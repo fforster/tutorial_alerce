@@ -39,21 +39,29 @@ class SurveyConfig:
 
 
 def _ztf_extra_params(params: dict[str, object]) -> dict[str, object]:
-    """Strip Nones, rename fields, add ranking=1. Matches the prototype's
-    SURVEY_CONFIG.ztf.extraParams behavior."""
+    """Strip Nones, rename fields, add ranking=1, sort by probability DESC.
+
+    Matches the prototype's SURVEY_CONFIG.ztf.extraParams behavior.
+    """
     out = {k: v for k, v in params.items() if v is not None and k != "survey"}
     if "class_name" in out:
         out["class"] = out.pop("class_name")
     if "n_det" in out:
         out["ndet"] = out.pop("n_det")
     out.setdefault("ranking", 1)
+    out.setdefault("order_by", "probability")
+    out.setdefault("order_mode", "DESC")
     return out
 
 
 def _lsst_extra_params(params: dict[str, object]) -> dict[str, object]:
     out = {k: v for k, v in params.items() if v is not None}
-    # The LSST list_objects endpoint expects survey as a query param.
+    # The LSST list_objects endpoint expects survey as a query param and
+    # already returns rows ordered by descending probability; we pass the
+    # order hints anyway so behavior is explicit.
     out.setdefault("survey", "lsst")
+    out.setdefault("order_by", "probability")
+    out.setdefault("order_mode", "DESC")
     return out
 
 

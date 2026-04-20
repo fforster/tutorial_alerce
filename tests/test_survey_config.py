@@ -27,14 +27,25 @@ def test_ztf_extra_params_remaps_field_names():
     assert out["probability"] == 0.9
 
 
+def test_ztf_extra_params_sorts_by_probability_desc():
+    out = SC("ztf").extra_params({})
+    assert out["order_by"] == "probability"
+    assert out["order_mode"] == "DESC"
+
+
 def test_lsst_extra_params_passthrough_and_drops_none():
     out = SC("lsst").extra_params({
         "class_name": "AGN",
         "n_det": 10,
         "probability": None,
     })
-    # LSST list_objects endpoint expects `survey` as a query param.
-    assert out == {"class_name": "AGN", "n_det": 10, "survey": "lsst"}
+    assert out == {
+        "class_name": "AGN",
+        "n_det": 10,
+        "survey": "lsst",
+        "order_by": "probability",
+        "order_mode": "DESC",
+    }
 
 
 def test_band_sets_differ():
