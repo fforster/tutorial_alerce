@@ -182,6 +182,11 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
     # Per-point identifier + has_stamp power the click-to-sync handler in JS.
     assert "has_stamp" in r.text
     assert "identifier" in r.text
+    # Flux/Mag toggle markup is present when there are points to plot.
+    assert 'class="lc-mode-toggle' in r.text
+    assert 'data-target="lc-canvas-ZTF21abc"' in r.text
+    assert 'data-lc-mode="flux"' in r.text
+    assert 'data-lc-mode="mag"' in r.text
 
 
 def test_lightcurve_empty_shows_message(client, monkeypatch):
@@ -196,6 +201,8 @@ def test_lightcurve_empty_shows_message(client, monkeypatch):
     assert r.status_code == 200
     assert "No detections" in r.text
     assert "data-lc=" not in r.text
+    # Toggle is only rendered alongside a chart.
+    assert "lc-mode-toggle" not in r.text
 
 
 def test_lightcurve_rejects_unknown_survey(client):

@@ -5,8 +5,10 @@
  * content in (htmx:afterSwap). Re-init destroys any prior chart on the same
  * canvas so detail-view swaps don't leak a chart instance.
  *
- * Flux is plotted in nJy (already normalized server-side). Y axis starts at
- * 0 so diff-flux detections sit above the baseline visibly.
+ * Flux is plotted in nJy (already normalized server-side). In "mag" mode we
+ * convert on the client with AB ZP 31.4 (same constant as normalize.py) and
+ * reverse the Y axis so brighter sits higher. Points with flux ≤ 0 can't be
+ * converted; they're dropped only in mag mode.
  */
 (function () {
   const BAND_COLORS = {
@@ -19,16 +21,27 @@
     unknown: "#888888",
   };
 
+  const AB_ZP_NJY = 31.4;
+  const LN10_OVER_2P5 = Math.log(10) / 2.5;
+
   // Canvas element → Chart instance, so we can destroy before re-initializing.
   const charts = new WeakMap();
 
-  function buildDatasets(bands, fpBands) {
+  function projectPoint(p, mode) {
+    if (mode === "mag") {
+      if (p.flux == null || p.flux <= 0) return null;
+      const mag = AB_ZP_NJY - 2.5 * Math.log10(p.flux);
+      const eMag = p.e_flux != null ? p.e_flux / p.flux / LN10_OVER_2P5 : null;
+      return { x: p.mjd, y: mag, e: eMag, identifier: p.identifier, has_stamp: p.has_stamp };
+    }
+    return { x: p.mjd, y: p.flux, e: p.e_flux, identifier: p.identifier, has_stamp: p.has_stamp };
+  }
+
+  function buildDatasets(bands, fpBands, mode) {
+    const project = (pts) => pts.map((p) => projectPoint(p, mode)).filter(Boolean);
     const det = bands.map((b) => ({
       label: b.name,
-      data: b.points.map((p) => ({
-        x: p.mjd, y: p.flux, e: p.e_flux,
-        identifier: p.identifier, has_stamp: p.has_stamp,
-      })),
+      data: project(b.points),
       backgroundColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       showLine: false,
@@ -40,10 +53,7 @@
     // FP rows don't carry a stamp identifier, so clicks on them are no-ops.
     const fp = (fpBands || []).map((b) => ({
       label: `${b.name} (FP)`,
-      data: b.points.map((p) => ({
-        x: p.mjd, y: p.flux, e: p.e_flux,
-        identifier: p.identifier, has_stamp: p.has_stamp,
-      })),
+      data: project(b.points),
       backgroundColor: "transparent",
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderWidth: 1,
@@ -53,6 +63,22 @@
       pointHoverRadius: 5,
     }));
     return [...det, ...fp];
+  }
+
+  function applyMode(chart, mode) {
+    const raw = chart.$lcRaw;
+    if (!raw) return;
+    chart.$lcMode = mode;
+    chart.data.datasets = buildDatasets(raw.bands, raw.fpBands, mode);
+    const y = chart.options.scales.y;
+    if (mode === "mag") {
+      y.title.text = "Magnitude (AB)";
+      y.reverse = true;
+    } else {
+      y.title.text = "Flux (nJy)";
+      y.reverse = false;
+    }
+    chart.update();
   }
 
   function initCanvas(canvas) {
@@ -73,9 +99,13 @@
     const prior = charts.get(canvas);
     if (prior) prior.destroy();
 
+    const bands = data.bands || [];
+    const fpBands = data.forced_phot_bands || [];
+    const initialMode = "flux";
+
     const chart = new Chart(canvas.getContext("2d"), {
       type: "scatter",
-      data: { datasets: buildDatasets(data.bands || [], data.forced_phot_bands || []) },
+      data: { datasets: buildDatasets(bands, fpBands, initialMode) },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -119,18 +149,46 @@
               label: (ctx) => {
                 const p = ctx.raw;
                 const err = p.e != null ? ` ± ${p.e.toPrecision(3)}` : "";
-                return `${ctx.dataset.label}: ${p.y.toPrecision(4)}${err} nJy @ MJD ${p.x.toFixed(3)}`;
+                const unit = chart.$lcMode === "mag" ? "mag" : "nJy";
+                return `${ctx.dataset.label}: ${p.y.toPrecision(4)}${err} ${unit} @ MJD ${p.x.toFixed(3)}`;
               },
             },
           },
         },
       },
     });
+    chart.$lcRaw = { bands, fpBands };
+    chart.$lcMode = initialMode;
     charts.set(canvas, chart);
+  }
+
+  function initToggles(root) {
+    (root || document).querySelectorAll(".lc-mode-toggle").forEach((toggle) => {
+      if (toggle.$bound) return;
+      toggle.$bound = true;
+      toggle.addEventListener("click", (evt) => {
+        const btn = evt.target.closest(".lc-mode-btn");
+        if (!btn) return;
+        const mode = btn.dataset.lcMode;
+        const canvas = document.getElementById(toggle.dataset.target);
+        const chart = canvas && charts.get(canvas);
+        if (!chart || chart.$lcMode === mode) return;
+        applyMode(chart, mode);
+        toggle.querySelectorAll(".lc-mode-btn").forEach((b) => {
+          const active = b.dataset.lcMode === mode;
+          b.setAttribute("aria-pressed", active ? "true" : "false");
+          b.classList.toggle("tw-bg-bg-secondary", active);
+          b.classList.toggle("tw-text-text-primary", active);
+          b.classList.toggle("tw-bg-bg-card", !active);
+          b.classList.toggle("tw-text-text-muted", !active);
+        });
+      });
+    });
   }
 
   function initAll(root) {
     (root || document).querySelectorAll("canvas.lightcurve-canvas").forEach(initCanvas);
+    initToggles(root);
   }
 
   document.addEventListener("DOMContentLoaded", () => initAll(document));
