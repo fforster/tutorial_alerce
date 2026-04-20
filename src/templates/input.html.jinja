@@ -1,0 +1,8 @@
+{% macro input(id, type="text", placeholder="", width="tw-w-full") %}
+<input
+  id="{{ id }}"
+  type="{{ type }}"
+  placeholder="{{ placeholder }}"
+  class="{{ width }} tw-bg-transparent tw-border-b tw-border-border tw-py-1 tw-px-2 tw-text-sm tw-text-text-primary tw-placeholder-text-muted focus:tw-outline-none focus:tw-border-accent"
+/>
+{% endmacro %}

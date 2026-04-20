@@ -1,0 +1,61 @@
+{% from "input.html.jinja" import input as customInput %}
+<div
+  id="form-search"
+  hx-ext="response-targets"
+  class="tw-p-4 tw-flex tw-flex-col tw-gap-4"
+>
+  <div class="tw-text-base tw-font-medium">Search Filters</div>
+
+  <div id="survey_container">
+    <p class="tw-text-sm tw-text-text-secondary tw-mb-2">Survey</p>
+    <div id="survey" data-survey="lsst" class="tw-flex tw-gap-2">
+      <span id="lsst_btn" class="tw-px-3 tw-py-1 tw-text-sm tw-bg-accent tw-text-bg-primary tw-rounded tw-cursor-pointer">LSST</span>
+      <span id="ztf_btn" class="tw-px-3 tw-py-1 tw-text-sm tw-border tw-border-border tw-rounded tw-cursor-pointer">ZTF</span>
+    </div>
+  </div>
+
+  <div>
+    {{ customInput(id="objectIds", type="text", placeholder="Object ID") }}
+  </div>
+
+  <div id="classifier_wrapper">
+    <p class="tw-text-sm tw-text-text-secondary tw-mb-1">Classifier</p>
+    <span
+      id="classifier"
+      class="tw-block tw-text-sm tw-text-text-muted"
+      data-classifier=""
+      data-classes="[]"
+      hx-get="{{ API_URL }}/htmx/classes_select"
+      hx-trigger="change"
+      hx-target="#classes_options"
+      hx-swap="innerHTML"
+      hx-vals='js:{...send_classes_data()}'
+    >Slice 2: classifiers will be fetched from the API.</span>
+    <div id="classes_options" class="tw-mt-2 tw-text-xs tw-text-text-muted"></div>
+  </div>
+
+  <div>
+    <label class="tw-text-sm tw-text-text-secondary">
+      Probability ≥ <span id="prob_number" class="mono">0.00</span>
+    </label>
+    <input id="prob_range" type="range" step="0.01" min="0" max="1" value="0" class="tw-w-full"/>
+  </div>
+
+  <div>
+    <p class="tw-text-sm tw-text-text-secondary">Number of detections</p>
+    <div class="tw-flex tw-gap-2">
+      {{ customInput(id="min_detections", type="number", placeholder="Min", width="tw-w-1/2") }}
+      {{ customInput(id="max_detections", type="number", placeholder="Max", width="tw-w-1/2") }}
+    </div>
+  </div>
+
+  <button
+    type="button"
+    class="tw-mt-2 tw-bg-accent tw-text-bg-primary tw-text-sm tw-font-medium tw-py-2 tw-rounded hover:tw-bg-accent-hover"
+    hx-get="{{ API_URL }}/htmx/list_objects"
+    hx-trigger="click"
+    hx-target="#results-slot"
+    hx-swap="innerHTML"
+    hx-vals='js:{...send_form_Data()}'
+  >Search</button>
+</div>

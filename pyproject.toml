@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "tutorial-alerce"
+version = "0.1.0"
+description = "htmx-based reimplementation of the ALeRCE Explorer (tutorial)"
+authors = ["Francisco Förster <francisco.forster@gmail.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+jinja2 = "^3.1.4"
+httpx = "^0.27.2"
+pydantic-settings = "^2.5.2"
+uvicorn = { extras = ["standard"], version = "^0.30.6" }
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.3"
+pytest-asyncio = "^0.24.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

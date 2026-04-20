@@ -1,0 +1,35 @@
+{% extends "base.html.jinja" %}
+
+{% block body %}
+<div class="tw-flex tw-flex-col tw-h-full">
+
+  <header class="tw-h-12 tw-bg-bg-secondary tw-border-b tw-border-border tw-flex tw-items-center tw-px-4 tw-gap-3">
+    <div class="tw-text-accent tw-font-bold tw-text-sm">
+      ALeRCE <span class="tw-text-text-secondary tw-font-normal tw-text-xs">tutorial · htmx</span>
+    </div>
+    <div class="tw-ml-auto tw-text-xs tw-text-text-muted">Slice 1 scaffold</div>
+  </header>
+
+  <div class="tw-flex tw-flex-1 tw-min-h-0">
+
+    <aside class="tw-w-80 tw-flex-shrink-0 tw-bg-bg-secondary tw-border-r tw-border-border tw-overflow-y-auto">
+      <div
+        id="search-form-slot"
+        hx-get="{{ API_URL }}/htmx/search_objects/"
+        hx-trigger="load"
+        hx-swap="innerHTML"
+      ></div>
+    </aside>
+
+    <main class="tw-flex-1 tw-overflow-auto tw-p-4">
+      <div
+        id="results-slot"
+        hx-get="{{ API_URL }}/htmx/list_objects"
+        hx-trigger="load"
+        hx-swap="innerHTML"
+      ></div>
+    </main>
+
+  </div>
+</div>
+{% endblock %}

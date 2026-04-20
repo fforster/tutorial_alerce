@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en" class="tw-h-full">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="htmx-config" content='{"selfRequestsOnly": false}'/>
+<title>{% block title %}ALeRCE Explorer (tutorial){% endblock %}</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+
+<link rel="stylesheet" href="/static/css/main.css"/>
+
+<script src="/static/htmx/htmx.min.js"></script>
+<script src="https://unpkg.com/htmx-ext-response-targets@2.0.2" crossorigin="anonymous"></script>
+<script src="/static/js/helpers.js" defer></script>
+</head>
+<body class="tw-h-full tw-bg-bg-primary tw-text-text-primary">
+{% block body %}{% endblock %}
+</body>
+</html>
