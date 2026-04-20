@@ -15,25 +15,51 @@
       </div>
       {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
         {#
-          Flux/Mag toggle is a pure client-side projection: points arrive in
-          nJy and lightcurve.js applies the AB-ZP-31.4 conversion when Mag is
-          selected. No server round trip.
+          Diff/Sci and Flux/Mag toggles are both pure client-side projections:
+          points arrive with both flux values (diff + optional sci) and the JS
+          picks which to plot + whether to apply the AB-ZP-31.4 mag transform.
+          No server round trip.
         #}
+        {% if lc.has_science_flux %}
+          <div
+            class="lc-source-toggle tw-inline-flex tw-rounded tw-border tw-border-border tw-overflow-hidden tw-text-xs"
+            data-target="lc-canvas-{{ oid }}"
+            title="Difference flux is measured on the subtracted image (source − reference). Science flux is the total flux on the science image, only available when a reference source exists; transients without a host may have no science-flux points."
+          >
+            <button
+              type="button"
+              class="lc-source-btn tw-px-2 tw-py-0.5 tw-bg-bg-secondary tw-text-text-primary"
+              data-lc-source="diff"
+              aria-pressed="true"
+              title="Difference flux: psf flux measured on the difference (science − reference) image."
+            >Diff</button>
+            <button
+              type="button"
+              class="lc-source-btn tw-px-2 tw-py-0.5 tw-bg-bg-card tw-text-text-muted"
+              data-lc-source="sci"
+              aria-pressed="false"
+              title="Science (total) flux on the science image. Derived from mag_corr for ZTF and scienceFlux for LSST; blank for points without an associated reference source (often the case for pure transients)."
+            >Sci</button>
+          </div>
+        {% endif %}
         <div
           class="lc-mode-toggle tw-inline-flex tw-rounded tw-border tw-border-border tw-overflow-hidden tw-text-xs"
           data-target="lc-canvas-{{ oid }}"
+          title="Switch the Y-axis between linear flux (nJy) and AB magnitude (zero point 31.4, reversed axis so brighter is up)."
         >
           <button
             type="button"
             class="lc-mode-btn tw-px-2 tw-py-0.5 tw-bg-bg-secondary tw-text-text-primary"
             data-lc-mode="flux"
             aria-pressed="true"
+            title="Linear flux in nanojansky."
           >Flux</button>
           <button
             type="button"
             class="lc-mode-btn tw-px-2 tw-py-0.5 tw-bg-bg-card tw-text-text-muted"
             data-lc-mode="mag"
             aria-pressed="false"
+            title="AB magnitude (ZP 31.4). Points with flux ≤ 0 are dropped."
           >Mag</button>
         </div>
       {% endif %}

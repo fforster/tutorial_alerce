@@ -37,8 +37,15 @@ def _bucket_by_band(normalized: list[dict[str, Any]], cfg) -> list[dict[str, Any
         bands.setdefault(band, []).append(
             {
                 "mjd": d["mjd"],
+                # `flux` carries difference-flux (psf_flux on diff image);
+                # `sci_flux` is the absolute science-image flux when the survey
+                # exposes it. The client picks which to plot via the Diff/Sci
+                # toggle; null sci_flux means "no science photometry for this
+                # point" and the client skips it in Sci mode.
                 "flux": d["psf_flux"],
                 "e_flux": d.get("e_psf_flux"),
+                "sci_flux": d.get("science_flux"),
+                "e_sci_flux": d.get("e_science_flux"),
                 # `identifier` + `has_stamp` let the client drive the stamps
                 # panel from a chart click without another round trip.
                 "identifier": d.get("identifier"),
@@ -72,6 +79,9 @@ def shape_lightcurve(
         "forced_phot_bands": fp_bands,
         "n_det": sum(len(b["points"]) for b in det_bands),
         "n_fp": sum(len(b["points"]) for b in fp_bands),
+        # Gates the client-side Diff/Sci toggle; LSST doesn't publish absolute
+        # science flux so the toggle is hidden entirely there.
+        "has_science_flux": cfg.has_science_flux,
     }
 
 

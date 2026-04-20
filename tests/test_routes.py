@@ -149,21 +149,25 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
             "bands": [
                 {"name": "g", "points": [{
                     "mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0,
+                    "sci_flux": 1200.0, "e_sci_flux": 12.0,
                     "identifier": "1", "has_stamp": True,
                 }]},
                 {"name": "r", "points": [{
                     "mjd": 60001.0, "flux": 1500.0, "e_flux": 15.0,
+                    "sci_flux": 1800.0, "e_sci_flux": 18.0,
                     "identifier": "2", "has_stamp": True,
                 }]},
             ],
             "forced_phot_bands": [
                 {"name": "g", "points": [{
                     "mjd": 59999.0, "flux": 50.0, "e_flux": 8.0,
+                    "sci_flux": None, "e_sci_flux": None,
                     "identifier": None, "has_stamp": False,
                 }]},
             ],
             "n_det": 2,
             "n_fp": 1,
+            "has_science_flux": True,
         }
 
     monkeypatch.setattr(
@@ -187,11 +191,18 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
     assert 'data-target="lc-canvas-ZTF21abc"' in r.text
     assert 'data-lc-mode="flux"' in r.text
     assert 'data-lc-mode="mag"' in r.text
+    # Diff/Sci toggle appears when the survey reports science flux.
+    assert 'class="lc-source-toggle' in r.text
+    assert 'data-lc-source="diff"' in r.text
+    assert 'data-lc-source="sci"' in r.text
 
 
 def test_lightcurve_empty_shows_message(client, monkeypatch):
     async def fake_lc(*, survey, oid):
-        return {"survey": survey, "bands": [], "forced_phot_bands": [], "n_det": 0, "n_fp": 0}
+        return {
+            "survey": survey, "bands": [], "forced_phot_bands": [],
+            "n_det": 0, "n_fp": 0, "has_science_flux": True,
+        }
 
     monkeypatch.setattr(
         "src.routes.htmx.lightcurve_service.get_lightcurve",
@@ -201,8 +212,34 @@ def test_lightcurve_empty_shows_message(client, monkeypatch):
     assert r.status_code == 200
     assert "No detections" in r.text
     assert "data-lc=" not in r.text
-    # Toggle is only rendered alongside a chart.
+    # Toggles only render alongside a chart.
     assert "lc-mode-toggle" not in r.text
+    assert "lc-source-toggle" not in r.text
+
+
+def test_lightcurve_hides_sci_toggle_when_survey_lacks_science_flux(client, monkeypatch):
+    async def fake_lc(*, survey, oid):
+        return {
+            "survey": survey,
+            "bands": [{"name": "g", "points": [{
+                "mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0,
+                "sci_flux": None, "e_sci_flux": None,
+                "identifier": "1", "has_stamp": False,
+            }]}],
+            "forced_phot_bands": [],
+            "n_det": 1, "n_fp": 0,
+            "has_science_flux": False,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lightcurve",
+        fake_lc,
+    )
+    r = client.get("/htmx/lightcurve?oid=x&survey_id=lsst")
+    assert r.status_code == 200
+    # Flux/Mag still present; Diff/Sci hidden.
+    assert "lc-mode-toggle" in r.text
+    assert "lc-source-toggle" not in r.text
 
 
 def test_lightcurve_rejects_unknown_survey(client):

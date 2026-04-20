@@ -63,6 +63,11 @@ def normalize_ztf(d: dict[str, Any]) -> dict[str, Any]:
         e_mag_corr = None
     mag_corr = d.get("magpsf_corr", d.get("mag_corr"))
     science_flux = ztf_mag_to_njy(mag_corr) if mag_corr is not None else None
+    e_science_flux = (
+        ztf_magerr_to_njyerr(mag_corr, e_mag_corr)
+        if mag_corr is not None and e_mag_corr is not None
+        else None
+    )
 
     candid = d.get("candid")
     # `identifier` is the survey-agnostic key used by the stamps endpoint —
@@ -75,6 +80,7 @@ def normalize_ztf(d: dict[str, Any]) -> dict[str, Any]:
         "psf_flux": psf_flux,
         "e_psf_flux": e_psf_flux,
         "science_flux": science_flux,
+        "e_science_flux": e_science_flux,
         "mag": mag,
         "e_mag": mag_err,
         "mag_corr": mag_corr,
@@ -106,6 +112,7 @@ def normalize_lsst(d: dict[str, Any]) -> dict[str, Any]:
         "psf_flux": flux,
         "e_psf_flux": flux_err,
         "science_flux": d.get("scienceFlux"),
+        "e_science_flux": d.get("scienceFluxErr"),
         "mag": mag,
         "e_mag": e_mag,
         "mag_corr": None,

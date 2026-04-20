@@ -116,7 +116,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
         bands=("u", "g", "r", "i", "z", "y"),
         default_classifier="lc_classifier_top",
         has_forced_phot=True,
-        has_science_flux=False,
+        has_science_flux=True,
         extinction_r={
             "u": 4.145, "g": 3.237, "r": 2.273,
             "i": 1.684, "z": 1.323, "y": 1.088,

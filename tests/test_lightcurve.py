@@ -102,6 +102,36 @@ def test_lsst_identifier_uses_measurement_id():
     assert out["bands"][0]["points"][0]["identifier"] == "9123456789012345"
 
 
+def test_ztf_sci_flux_propagated_from_mag_corr():
+    raw = {"detections": [{
+        "mjd": 60000.0, "fid": 1,
+        "magpsf": 20.0, "sigmapsf": 0.05,
+        "magpsf_corr": 19.8, "sigmapsf_corr": 0.04,
+        "candid": "1", "isdiffpos": 1,
+    }]}
+    out = shape_lightcurve(raw, survey="ztf")
+    p = out["bands"][0]["points"][0]
+    assert p["sci_flux"] == math.pow(10.0, (31.4 - 19.8) / 2.5)
+    assert p["e_sci_flux"] is not None and p["e_sci_flux"] > 0
+
+
+def test_ztf_sci_flux_none_when_mag_corr_missing():
+    raw = {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
+    out = shape_lightcurve(raw, survey="ztf")
+    p = out["bands"][0]["points"][0]
+    assert p["sci_flux"] is None
+    assert p["e_sci_flux"] is None
+
+
+def test_has_science_flux_reflects_survey_capability():
+    # Both surveys publish science (absolute) flux — ZTF via magpsf_corr, LSST
+    # via scienceFlux — so the toggle is available on both.
+    raw = {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
+    assert shape_lightcurve(raw, survey="ztf")["has_science_flux"] is True
+    raw_lsst = {"detections": [_lsst_det(60000.0, 1, 1000.0)]}
+    assert shape_lightcurve(raw_lsst, survey="lsst")["has_science_flux"] is True
+
+
 def test_lsst_fp_buckets_into_forced_phot_bands():
     raw = {"detections": [_lsst_det(60000.0, 1, 1000.0)]}
     fp = [
