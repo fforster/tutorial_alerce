@@ -95,6 +95,66 @@ def test_list_objects_without_survey_shows_hint(client):
     assert "Pick a survey" in r.text
 
 
+def test_row_is_clickable_with_detail_url(client, stub_services):
+    r = client.get("/htmx/list_objects?survey=lsst&page=1")
+    assert r.status_code == 200
+    assert "/htmx/detail?oid=LSST-1&survey_id=lsst" in r.text
+
+
+def test_detail_renders_container(client):
+    r = client.get("/htmx/detail?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "Back to results" in r.text
+    assert "/htmx/object_information?oid=ZTF21abc&survey_id=ztf" in r.text
+    # Later-slice placeholders
+    assert "slice 4" in r.text
+    assert "slice 5" in r.text
+    assert "slice 6" in r.text
+
+
+def test_detail_rejects_unknown_survey(client):
+    r = client.get("/htmx/detail?oid=x&survey_id=panstarrs")
+    assert r.status_code == 400
+
+
+def test_object_information_renders_basic_fields(client, monkeypatch):
+    async def fake_info(*, survey, oid):
+        return {
+            "oid": oid, "survey": survey,
+            "ra": 180.0, "dec": -30.0,
+            "ra_hms": "12:00:00.000", "dec_dms": "-30:00:00.00",
+            "firstmjd": 60000.0, "lastmjd": 60100.0, "delta_mjd": 100.0,
+            "n_det": 12, "n_non_det": 38, "n_forced": None,
+            "corrected": True, "stellar": False,
+            "archives": [{"name": "ALeRCE Explorer", "url": "https://alerce.online/object/ZTF21abc"}],
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
+    )
+    r = client.get("/htmx/object_information?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "ZTF21abc" in r.text
+    assert "12:00:00.000" in r.text
+    assert "-30:00:00.00" in r.text
+    assert "60000.000" in r.text
+    assert "ALeRCE Explorer" in r.text
+
+
+def test_object_information_upstream_error_renders_message(client, monkeypatch):
+    async def fake_info(*, survey, oid):
+        raise RuntimeError("timeout")
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
+    )
+    r = client.get("/htmx/object_information?oid=x&survey_id=ztf")
+    assert r.status_code == 200
+    assert "Upstream error" in r.text
+
+
 def test_classes_select_renders_options(client):
     r = client.get(
         "/htmx/classes_select",

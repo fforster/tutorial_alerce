@@ -1,8 +1,69 @@
+{#
+  Basic Information panel — populated by /htmx/object_information.
+  Expects `info` (shape_object_info output) and `survey_id`.
+#}
 <div id="basic-info" class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-sm">
-  <div class="tw-text-text-secondary tw-text-xs tw-uppercase tw-mb-2">Basic Information</div>
-  <div class="mono tw-text-base tw-mb-2">{{ oid }}</div>
-  <div class="tw-text-text-muted tw-text-xs">Survey: {{ survey_id }}</div>
-  <div class="tw-mt-3 tw-text-xs tw-text-text-muted">
-    Slice 3 will populate coordinates, first/last MJD, detection counts, other archives.
+  <div class="tw-flex tw-items-center tw-justify-between tw-mb-3">
+    <div>
+      <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Basic Information</div>
+      <div class="mono tw-text-base tw-mt-1">{{ info.oid }}</div>
+      <div class="tw-text-text-muted tw-text-xs tw-mt-1">Survey: {{ survey_id }}</div>
+    </div>
+
+    {% if info.archives %}
+    <details class="tw-relative">
+      <summary class="tw-cursor-pointer tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded">
+        Other archives ▾
+      </summary>
+      <div class="tw-absolute tw-right-0 tw-mt-1 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-p-2 tw-min-w-48 tw-z-10 tw-shadow-lg">
+        {% for link in info.archives %}
+          <a href="{{ link.url }}" target="_blank" rel="noopener"
+             class="tw-block tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary hover:tw-bg-bg-tertiary tw-rounded">
+            {{ link.name }}
+          </a>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
   </div>
+
+  <dl class="tw-grid tw-grid-cols-[auto_1fr] tw-gap-x-4 tw-gap-y-1 tw-text-xs">
+    <dt class="tw-text-text-secondary">RA</dt>
+    <dd class="mono">
+      {% if info.ra is not none %}{{ "%.5f"|format(info.ra) }}{% if info.ra_hms %} <span class="tw-text-text-muted">({{ info.ra_hms }})</span>{% endif %}{% else %}-{% endif %}
+    </dd>
+
+    <dt class="tw-text-text-secondary">Dec</dt>
+    <dd class="mono">
+      {% if info.dec is not none %}{{ "%.5f"|format(info.dec) }}{% if info.dec_dms %} <span class="tw-text-text-muted">({{ info.dec_dms }})</span>{% endif %}{% else %}-{% endif %}
+    </dd>
+
+    <dt class="tw-text-text-secondary">First MJD</dt>
+    <dd class="mono">{% if info.firstmjd is not none %}{{ "%.3f"|format(info.firstmjd) }}{% else %}-{% endif %}</dd>
+
+    <dt class="tw-text-text-secondary">Last MJD</dt>
+    <dd class="mono">{% if info.lastmjd is not none %}{{ "%.3f"|format(info.lastmjd) }}{% else %}-{% endif %}</dd>
+
+    <dt class="tw-text-text-secondary">Δ MJD</dt>
+    <dd class="mono">{% if info.delta_mjd is not none %}{{ "%.3f"|format(info.delta_mjd) }}{% else %}-{% endif %}</dd>
+
+    <dt class="tw-text-text-secondary">N det</dt>
+    <dd class="mono">{% if info.n_det is not none %}{{ info.n_det }}{% else %}-{% endif %}</dd>
+
+    <dt class="tw-text-text-secondary">N non-det</dt>
+    <dd class="mono">{% if info.n_non_det is not none %}{{ info.n_non_det }}{% else %}-{% endif %}</dd>
+
+    {% if info.n_forced is not none %}
+    <dt class="tw-text-text-secondary">N forced</dt>
+    <dd class="mono">{{ info.n_forced }}</dd>
+    {% endif %}
+
+    {% if survey_id == 'ztf' %}
+    <dt class="tw-text-text-secondary">Corrected</dt>
+    <dd class="mono">{% if info.corrected is not none %}{{ info.corrected }}{% else %}-{% endif %}</dd>
+
+    <dt class="tw-text-text-secondary">Stellar</dt>
+    <dd class="mono">{% if info.stellar is not none %}{{ info.stellar }}{% else %}-{% endif %}</dd>
+    {% endif %}
+  </dl>
 </div>

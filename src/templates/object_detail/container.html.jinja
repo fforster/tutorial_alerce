@@ -1,0 +1,43 @@
+{#
+  Object detail container — swapped into #results-slot when a row is clicked.
+  Contains a back button, the basic-information panel, and placeholders for
+  later slices (light curve, stamps, Aladin).
+#}
+<div id="object-detail" class="tw-flex tw-flex-col tw-gap-3">
+
+  <div class="tw-flex tw-items-center tw-gap-2">
+    <button
+      type="button"
+      class="tw-px-3 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+      hx-get="{{ API_URL }}/htmx/list_objects"
+      hx-target="#results-slot"
+      hx-swap="innerHTML"
+      hx-indicator="#results-loading"
+      hx-vals='js:{...send_form_Data()}'
+    >← Back to results</button>
+    <div class="tw-text-xs tw-text-text-muted">{{ survey_id|upper }} · {{ oid }}</div>
+  </div>
+
+  <div
+    id="basic-info-slot"
+    hx-get="{{ API_URL }}/htmx/object_information?oid={{ oid }}&survey_id={{ survey_id }}"
+    hx-trigger="load"
+    hx-swap="innerHTML"
+  >
+    <div class="tw-text-xs tw-text-text-muted tw-p-4">Loading basic information…</div>
+  </div>
+
+  <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
+    Light curve — coming in slice 4.
+  </div>
+
+  <div class="tw-grid tw-grid-cols-2 tw-gap-3">
+    <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
+      Stamps — coming in slice 5.
+    </div>
+    <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
+      Aladin — coming in slice 6.
+    </div>
+  </div>
+
+</div>

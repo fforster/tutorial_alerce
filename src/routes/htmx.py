@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from ..services import classifiers as classifiers_service
+from ..services import object_info as object_info_service
 from ..services import object_list as object_list_service
 from ..services.survey_config import known_surveys
 
@@ -120,11 +121,28 @@ async def list_objects(
     )
 
 
-@router.get("/htmx/object_information", response_class=HTMLResponse)
-async def object_information(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+@router.get("/htmx/detail", response_class=HTMLResponse)
+async def detail(request: Request, oid: str, survey_id: str) -> HTMLResponse:
     _validate_survey(survey_id)
     return templates.TemplateResponse(
         request,
-        "basic_information/basicInformationPreview.html.jinja",
+        "object_detail/container.html.jinja",
         {"oid": oid, "survey_id": survey_id},
+    )
+
+
+@router.get("/htmx/object_information", response_class=HTMLResponse)
+async def object_information(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    _validate_survey(survey_id)
+    try:
+        info = await object_info_service.get_object_info(survey=survey_id, oid=oid)
+    except Exception as e:
+        log.exception("object_information failed")
+        return HTMLResponse(
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
+        )
+    return templates.TemplateResponse(
+        request,
+        "basic_information/basicInformationPreview.html.jinja",
+        {"info": info, "survey_id": survey_id},
     )

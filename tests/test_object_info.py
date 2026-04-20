@@ -1,0 +1,82 @@
+"""Tests for shape_object_info — handles ZTF ↔ LSST field differences."""
+from __future__ import annotations
+
+from src.services.object_info import shape_object_info
+
+
+def test_ztf_uses_ndet_and_derives_non_det():
+    raw = {
+        "oid": "ZTF21abc",
+        "meanra": 180.0,
+        "meandec": -30.0,
+        "firstmjd": 60000.0,
+        "lastmjd": 60100.0,
+        "ndet": 12,
+        "ncovhist": 50,
+        "ndethist": 12,
+        "corrected": True,
+        "stellar": False,
+    }
+    info = shape_object_info(raw, survey="ztf")
+    assert info["n_det"] == 12
+    assert info["n_non_det"] == 38  # 50 - 12
+    assert info["corrected"] is True
+    assert info["stellar"] is False
+    assert info["delta_mjd"] == 100.0
+
+
+def test_ztf_missing_cov_hist_leaves_non_det_none():
+    raw = {"oid": "ZTF21abc", "ndet": 5}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["n_det"] == 5
+    assert info["n_non_det"] is None
+
+
+def test_lsst_uses_snake_case_fields():
+    raw = {
+        "oid": 123456789012345678,
+        "meanra": 45.0,
+        "meandec": -10.0,
+        "firstmjd": 60000.0,
+        "lastmjd": 60050.0,
+        "n_det": 8,
+        "n_non_det": 3,
+        "n_forced": 50,
+    }
+    info = shape_object_info(raw, survey="lsst")
+    assert info["oid"] == "123456789012345678"
+    assert info["n_det"] == 8
+    assert info["n_non_det"] == 3
+    assert info["n_forced"] == 50
+    # ZTF-only fields are None on LSST
+    assert info["corrected"] is None
+    assert info["stellar"] is None
+
+
+def test_ra_dec_get_hms_dms_strings():
+    raw = {"oid": "x", "meanra": 180.0, "meandec": -30.0}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["ra_hms"] == "12:00:00.000"
+    assert info["dec_dms"].startswith("-30:")
+
+
+def test_archives_included():
+    raw = {"oid": "ZTF21abc", "meanra": 180.0, "meandec": -30.0}
+    info = shape_object_info(raw, survey="ztf")
+    names = [link["name"] for link in info["archives"]]
+    assert "ALeRCE Explorer" in names
+    assert "SIMBAD" in names
+
+
+def test_delta_mjd_prefers_explicit_field():
+    raw = {"oid": "x", "firstmjd": 60000.0, "lastmjd": 60100.0, "deltamjd": 42.0}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["delta_mjd"] == 42.0
+
+
+def test_missing_ra_dec_returns_none():
+    raw = {"oid": "x"}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["ra"] is None
+    assert info["ra_hms"] is None
+    assert info["dec_dms"] is None

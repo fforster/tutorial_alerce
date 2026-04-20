@@ -20,7 +20,13 @@
         </thead>
         <tbody>
         {% for obj in objects_list['items'] %}
-          <tr class="tw-border-b tw-border-border/50 hover:tw-bg-bg-tertiary">
+          <tr
+            class="tw-border-b tw-border-border/50 hover:tw-bg-bg-tertiary tw-cursor-pointer"
+            hx-get="{{ API_URL }}/htmx/detail?oid={{ obj.get('oid', '') }}&survey_id={{ survey }}"
+            hx-target="#results-slot"
+            hx-swap="innerHTML"
+            hx-indicator="#results-loading"
+          >
             <td class="tw-px-3 tw-py-2 mono">{{ obj.get('oid', '-') }}</td>
             <td class="tw-px-3 tw-py-2 mono">{{ obj.get('n_det', '-') }}</td>
             <td class="tw-px-3 tw-py-2">{{ obj.get('classifier_name', '-') }}</td>
