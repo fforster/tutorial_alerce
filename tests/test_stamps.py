@@ -94,3 +94,23 @@ def test_large_lsst_measurement_id_preserved_as_string():
     raw = {"detections": [_lsst_det(60000.0, 1, 9007199254740993)]}  # > 2**53
     ctx = shape_stamps_context(raw, survey="lsst", oid="x", identifier=None)
     assert ctx["selected"]["identifier"] == "9007199254740993"
+
+
+def test_stamp_url_templates_use_ident_placeholder():
+    raw = {"detections": [_ztf_det(60000.0, 1, 42)]}
+    ctx = shape_stamps_context(raw, survey="ztf", oid="ZTF21abc", identifier=None)
+    tmpls = ctx["stamp_url_templates"]
+    assert set(tmpls) == {"science", "template", "difference"}
+    for t, url in tmpls.items():
+        assert "__IDENT__" in url
+        assert "ZTF21abc" in url
+
+
+def test_stamp_url_templates_present_even_when_no_selection():
+    ctx = shape_stamps_context({"detections": []}, survey="lsst", oid="LSST-1", identifier=None)
+    # URL-based stamp fetches make no sense without a selection, but templates
+    # describe the URL shape and should always be emitted so the client helper
+    # works uniformly.
+    tmpls = ctx["stamp_url_templates"]
+    assert set(tmpls) == {"science", "template", "difference"}
+    assert "__IDENT__" in tmpls["science"]

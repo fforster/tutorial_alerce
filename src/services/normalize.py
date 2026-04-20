@@ -65,6 +65,10 @@ def normalize_ztf(d: dict[str, Any]) -> dict[str, Any]:
     science_flux = ztf_mag_to_njy(mag_corr) if mag_corr is not None else None
 
     candid = d.get("candid")
+    # `identifier` is the survey-agnostic key used by the stamps endpoint —
+    # candid for ZTF, measurement_id for LSST. Keep it as a string so 64-bit
+    # LSST ids survive JSON round-trips.
+    ident = str(candid) if candid is not None else None
     return {
         "mjd": d.get("mjd"),
         "band": band,
@@ -76,8 +80,9 @@ def normalize_ztf(d: dict[str, Any]) -> dict[str, Any]:
         "mag_corr": mag_corr,
         "e_mag_corr": e_mag_corr,
         "isdiffpos": _coerce_isdiffpos(d.get("isdiffpos")),
-        # Compare as string — candid can exceed 2**53.
-        "candid": str(candid) if candid is not None else None,
+        "candid": ident,
+        "identifier": ident,
+        "has_stamp": bool(d.get("has_stamp")),
     }
 
 
@@ -93,6 +98,8 @@ def normalize_lsst(d: dict[str, Any]) -> dict[str, Any]:
     band_raw = d.get("band")
     band_map = d.get("band_map") or {}
     band_letter = band_map.get(str(band_raw)) if band_raw is not None else None
+    mid = d.get("measurement_id")
+    ident = str(mid) if mid is not None else None
     return {
         "mjd": d.get("mjd"),
         "band": band_letter if band_letter is not None else band_raw,
@@ -105,6 +112,8 @@ def normalize_lsst(d: dict[str, Any]) -> dict[str, Any]:
         "e_mag_corr": None,
         "isdiffpos": None,
         "candid": str(d["candid"]) if d.get("candid") is not None else None,
+        "identifier": ident,
+        "has_stamp": bool(d.get("has_stamp")),
     }
 
 

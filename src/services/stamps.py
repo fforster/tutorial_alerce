@@ -69,6 +69,15 @@ def shape_stamps_context(
         if selected
         else {}
     )
+    # Client-side swappable templates: same URL shape but with __IDENT__ in
+    # place of the candid / measurement_id. The browser substitutes the real
+    # identifier when the user clicks a different detection (either in the
+    # picker or on the light-curve chart), so we don't have to re-hit ALeRCE
+    # just to rebuild a URL pattern we already know.
+    stamp_url_templates = {
+        t: cfg.stamp_url(oid=oid, identifier="__IDENT__", stamp_type=t)
+        for t in STAMP_TYPES
+    }
 
     return {
         "oid": oid,
@@ -77,6 +86,7 @@ def shape_stamps_context(
         "selected": selected,
         "stamp_types": list(STAMP_TYPES),
         "stamp_urls": stamp_urls,
+        "stamp_url_templates": stamp_url_templates,
     }
 
 

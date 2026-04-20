@@ -9,11 +9,12 @@
     <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Light curve</div>
     <div class="tw-text-text-muted tw-text-xs">
       {{ lc.n_det }} detection{% if lc.n_det != 1 %}s{% endif %}
+      {% if lc.n_fp %}· {{ lc.n_fp }} FP{% endif %}
       · {{ lc.bands|length }} band{% if lc.bands|length != 1 %}s{% endif %}
     </div>
   </div>
 
-  {% if lc.n_det > 0 %}
+  {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
     <div class="tw-relative tw-h-72">
       <canvas
         id="lc-canvas-{{ oid }}"

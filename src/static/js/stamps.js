@@ -327,16 +327,45 @@
     ctx.restore();
   }
 
-  function initAll(root) {
-    const canvases = (root || document).querySelectorAll("canvas.stamp-canvas");
-    canvases.forEach((canvas) => {
-      if (rendered.has(canvas)) return;
-      const url = canvas.dataset.stampUrl;
-      if (!url) return;
-      rendered.add(canvas);
-      loadAndRenderFitsStamp(canvas, url);
-    });
+  function initCanvas(canvas) {
+    if (rendered.has(canvas)) return;
+    const url = canvas.dataset.stampUrl;
+    if (!url) return;
+    rendered.add(canvas);
+    loadAndRenderFitsStamp(canvas, url);
   }
+
+  function initAll(root) {
+    (root || document).querySelectorAll("canvas.stamp-canvas").forEach(initCanvas);
+  }
+
+  // Zero-round-trip identifier swap: the server emits stamp URL templates with
+  // __IDENT__ placeholders as data attrs on #stamps-panel. We rewrite each
+  // canvas's URL locally and force a re-render — no hit to our server.
+  window.updateStampsForIdentifier = function (ident) {
+    if (!ident) return;
+    const panel = document.getElementById("stamps-panel");
+    if (!panel) return;
+    const canvases = panel.querySelectorAll("canvas.stamp-canvas");
+    canvases.forEach((canvas) => {
+      const type = canvas.dataset.stampType;
+      const tpl = panel.dataset[`urlTemplate${type.charAt(0).toUpperCase() + type.slice(1)}`]
+        || panel.getAttribute(`data-url-template-${type}`);
+      if (!tpl) return;
+      canvas.dataset.stampUrl = tpl.replace("__IDENT__", encodeURIComponent(ident));
+      rendered.delete(canvas);
+      const card = canvas.closest(".tw-relative") || canvas.parentElement;
+      const loadingEl = card?.querySelector(".stamp-loading");
+      const compassEl = card?.querySelector(".stamp-compass");
+      if (loadingEl) { loadingEl.textContent = "loading…"; loadingEl.style.display = ""; }
+      if (compassEl) compassEl.textContent = "";
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      initCanvas(canvas);
+    });
+    const picker = panel.querySelector('select[name="identifier"]');
+    if (picker && picker.value !== String(ident)) picker.value = String(ident);
+  };
 
   document.addEventListener("DOMContentLoaded", () => initAll(document));
   document.addEventListener("htmx:afterSwap", (evt) => initAll(evt.detail.target));

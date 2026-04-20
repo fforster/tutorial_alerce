@@ -1,28 +1,35 @@
 {#
   Stamp viewer panel — rendered by /htmx/stamps.
 
-  Contract: ctx has {detections, selected, stamp_types, stamp_urls}.
+  Contract: ctx has {detections, selected, stamp_types, stamp_urls,
+  stamp_url_templates}.
   - `detections` is the picker list (identifier, mjd, band) sorted MJD DESC.
-  - `selected` is the currently chosen entry; `stamp_urls` has one URL per
-    stamp type for it.
-  - The browser fetches gzip-FITS from each URL, parses it, and draws on a
-    canvas. Survey differences (URL shape, type names) live server-side.
+  - `selected` is the currently chosen entry; `stamp_urls` has the initial
+    URL per stamp type.
+  - `stamp_url_templates` has the same URLs with __IDENT__ in place of the
+    identifier; the client swaps that placeholder to repoint the canvases
+    at a different detection without another server round trip.
 
-  Changing the detection re-hits /htmx/stamps with `identifier=...`, so htmx
-  swaps the whole panel — old canvases are discarded cleanly.
+  Detection changes (picker onchange OR a light-curve chart click) are
+  handled entirely in stamps.js via window.updateStampsForIdentifier(id),
+  so only the initial panel load hits this endpoint.
 #}
-<div id="stamps-panel" class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
+<div
+  id="stamps-panel"
+  class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4"
+  data-oid="{{ oid }}"
+  data-survey="{{ survey_id }}"
+  {% for t in ctx.stamp_types %}
+    data-url-template-{{ t }}="{{ ctx.stamp_url_templates[t] }}"
+  {% endfor %}
+>
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-3 tw-gap-3">
     <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Stamps</div>
     {% if ctx.detections %}
       <select
         class="tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary"
-        hx-get="{{ API_URL }}/htmx/stamps"
-        hx-trigger="change"
-        hx-target="#stamps-panel"
-        hx-swap="outerHTML"
-        hx-vals='{"oid": {{ oid|tojson }}, "survey_id": {{ survey_id|tojson }}}'
         name="identifier"
+        onchange="window.updateStampsForIdentifier && window.updateStampsForIdentifier(this.value)"
       >
         {% for d in ctx.detections %}
           <option

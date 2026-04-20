@@ -18,6 +18,11 @@ class SurveyConfig:
     objects_path: str
     object_path_template: str  # uses {oid}
     lightcurve_url_template: str  # full URL; uses {oid}
+    # Forced-photometry URL. For LSST this is a dedicated endpoint that returns
+    # a plain list of FP records. For ZTF it's the v2 lightcurve endpoint which
+    # returns {detections, non_detections, forced_photometry} — we only read
+    # the forced_photometry key. None if the survey doesn't expose FP.
+    fp_url_template: str | None  # full URL; uses {oid}
     # Stamp URL template + per-type name mapping. `{identifier}` is the ZTF
     # candid or LSST measurement_id. `{stamp_type}` is the survey-specific
     # type name (see stamp_type_names). Returns gzip-FITS.
@@ -43,6 +48,11 @@ class SurveyConfig:
 
     def lightcurve_url(self, oid: str) -> str:
         return self.lightcurve_url_template.format(oid=oid)
+
+    def fp_url(self, oid: str) -> str | None:
+        if not self.fp_url_template:
+            return None
+        return self.fp_url_template.format(oid=oid)
 
     def stamp_url(self, *, oid: str, identifier: str, stamp_type: str) -> str:
         survey_type = self.stamp_type_names[stamp_type]
@@ -89,6 +99,10 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
             "https://api-lsst.alerce.online/lightcurve_api/lightcurve"
             "?survey_id=lsst&oid={oid}"
         ),
+        fp_url_template=(
+            "https://api-lsst.alerce.online/lightcurve_api/forced-photometry"
+            "?survey_id=lsst&oid={oid}"
+        ),
         stamp_url_template=(
             "https://api-lsst.alerce.online/stamps_api/stamp"
             "?survey_id=lsst&oid={oid}&measurement_id={identifier}"
@@ -101,7 +115,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
         },
         bands=("u", "g", "r", "i", "z", "y"),
         default_classifier="lc_classifier_top",
-        has_forced_phot=False,
+        has_forced_phot=True,
         has_science_flux=False,
         extinction_r={
             "u": 4.145, "g": 3.237, "r": 2.273,
@@ -116,6 +130,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
         objects_path="objects",
         object_path_template="objects/{oid}",
         lightcurve_url_template="https://api.alerce.online/ztf/v1/objects/{oid}/lightcurve",
+        fp_url_template="https://api.alerce.online/v2/lightcurve/lightcurve/{oid}?survey_id=ztf",
         stamp_url_template=(
             "https://avro.alerce.online/get_stamp"
             "?oid={oid}&candid={identifier}&type={stamp_type}&format=fits"

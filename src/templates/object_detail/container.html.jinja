@@ -18,23 +18,24 @@
     <div class="tw-text-xs tw-text-text-muted">{{ survey_id|upper }} · {{ oid }}</div>
   </div>
 
-  <div
-    id="basic-info-slot"
-    hx-get="{{ API_URL }}/htmx/object_information?oid={{ oid }}&survey_id={{ survey_id }}"
-    hx-trigger="load"
-    hx-swap="innerHTML"
-  >
-    <div class="tw-text-xs tw-text-text-muted tw-p-4">Loading basic information…</div>
-  </div>
-
-  <div
-    id="lightcurve-slot"
-    hx-get="{{ API_URL }}/htmx/lightcurve?oid={{ oid }}&survey_id={{ survey_id }}"
-    hx-trigger="load"
-    hx-swap="innerHTML"
-  >
-    <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
-      Loading light curve…
+  <div class="tw-grid tw-grid-cols-2 tw-gap-3">
+    <div
+      id="basic-info-slot"
+      hx-get="{{ API_URL }}/htmx/object_information?oid={{ oid }}&survey_id={{ survey_id }}"
+      hx-trigger="load"
+      hx-swap="innerHTML"
+    >
+      <div class="tw-text-xs tw-text-text-muted tw-p-4">Loading basic information…</div>
+    </div>
+    <div
+      id="lightcurve-slot"
+      hx-get="{{ API_URL }}/htmx/lightcurve?oid={{ oid }}&survey_id={{ survey_id }}"
+      hx-trigger="load"
+      hx-swap="innerHTML"
+    >
+      <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
+        Loading light curve…
+      </div>
     </div>
   </div>
 

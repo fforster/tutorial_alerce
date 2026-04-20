@@ -147,10 +147,23 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
         return {
             "survey": survey,
             "bands": [
-                {"name": "g", "points": [{"mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0, "candid": "1"}]},
-                {"name": "r", "points": [{"mjd": 60001.0, "flux": 1500.0, "e_flux": 15.0, "candid": "2"}]},
+                {"name": "g", "points": [{
+                    "mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0,
+                    "identifier": "1", "has_stamp": True,
+                }]},
+                {"name": "r", "points": [{
+                    "mjd": 60001.0, "flux": 1500.0, "e_flux": 15.0,
+                    "identifier": "2", "has_stamp": True,
+                }]},
+            ],
+            "forced_phot_bands": [
+                {"name": "g", "points": [{
+                    "mjd": 59999.0, "flux": 50.0, "e_flux": 8.0,
+                    "identifier": None, "has_stamp": False,
+                }]},
             ],
             "n_det": 2,
+            "n_fp": 1,
         }
 
     monkeypatch.setattr(
@@ -164,11 +177,16 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
     # JSON payload is embedded; spot-check a value.
     assert "60000" in r.text
     assert "2 detections" in r.text
+    assert "1 FP" in r.text
+    assert "forced_phot_bands" in r.text
+    # Per-point identifier + has_stamp power the click-to-sync handler in JS.
+    assert "has_stamp" in r.text
+    assert "identifier" in r.text
 
 
 def test_lightcurve_empty_shows_message(client, monkeypatch):
     async def fake_lc(*, survey, oid):
-        return {"survey": survey, "bands": [], "n_det": 0}
+        return {"survey": survey, "bands": [], "forced_phot_bands": [], "n_det": 0, "n_fp": 0}
 
     monkeypatch.setattr(
         "src.routes.htmx.lightcurve_service.get_lightcurve",
@@ -231,6 +249,11 @@ def test_stamps_renders_picker_and_canvases(client, monkeypatch):
                 "template": "https://x/template",
                 "difference": "https://x/difference",
             },
+            "stamp_url_templates": {
+                "science": "https://x/science?id=__IDENT__",
+                "template": "https://x/template?id=__IDENT__",
+                "difference": "https://x/difference?id=__IDENT__",
+            },
         }
 
     monkeypatch.setattr(
@@ -247,6 +270,12 @@ def test_stamps_renders_picker_and_canvases(client, monkeypatch):
     # Picker options reference both identifiers.
     assert 'value="111"' in r.text
     assert 'value="222"' in r.text
+    # Client-side identifier sync: URL templates emitted as data attrs, and the
+    # picker's onchange calls the global helper (no htmx roundtrip).
+    assert 'data-url-template-science="https://x/science?id=__IDENT__"' in r.text
+    assert 'data-url-template-template=' in r.text
+    assert 'data-url-template-difference=' in r.text
+    assert "updateStampsForIdentifier" in r.text
 
 
 def test_stamps_empty_shows_message(client, monkeypatch):
@@ -256,6 +285,11 @@ def test_stamps_empty_shows_message(client, monkeypatch):
             "detections": [], "selected": None,
             "stamp_types": ["science", "template", "difference"],
             "stamp_urls": {},
+            "stamp_url_templates": {
+                "science": "https://x/science?id=__IDENT__",
+                "template": "https://x/template?id=__IDENT__",
+                "difference": "https://x/difference?id=__IDENT__",
+            },
         }
 
     monkeypatch.setattr(

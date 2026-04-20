@@ -22,16 +22,37 @@
   // Canvas element → Chart instance, so we can destroy before re-initializing.
   const charts = new WeakMap();
 
-  function buildDatasets(bands) {
-    return bands.map((b) => ({
+  function buildDatasets(bands, fpBands) {
+    const det = bands.map((b) => ({
       label: b.name,
-      data: b.points.map((p) => ({ x: p.mjd, y: p.flux, e: p.e_flux })),
+      data: b.points.map((p) => ({
+        x: p.mjd, y: p.flux, e: p.e_flux,
+        identifier: p.identifier, has_stamp: p.has_stamp,
+      })),
       backgroundColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       showLine: false,
       pointRadius: 3,
       pointHoverRadius: 5,
     }));
+    // FP uses the same band colors but rendered as hollow triangles so they
+    // read as distinct from detections without crowding the legend/tooltip.
+    // FP rows don't carry a stamp identifier, so clicks on them are no-ops.
+    const fp = (fpBands || []).map((b) => ({
+      label: `${b.name} (FP)`,
+      data: b.points.map((p) => ({
+        x: p.mjd, y: p.flux, e: p.e_flux,
+        identifier: p.identifier, has_stamp: p.has_stamp,
+      })),
+      backgroundColor: "transparent",
+      borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
+      borderWidth: 1,
+      pointStyle: "triangle",
+      showLine: false,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+    }));
+    return [...det, ...fp];
   }
 
   function initCanvas(canvas) {
@@ -54,10 +75,27 @@
 
     const chart = new Chart(canvas.getContext("2d"), {
       type: "scatter",
-      data: { datasets: buildDatasets(data.bands || []) },
+      data: { datasets: buildDatasets(data.bands || [], data.forced_phot_bands || []) },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        onClick: (_evt, elements) => {
+          if (!elements.length) return;
+          const { datasetIndex, index } = elements[0];
+          const p = chart.data.datasets[datasetIndex].data[index];
+          if (p?.has_stamp && p.identifier && window.updateStampsForIdentifier) {
+            window.updateStampsForIdentifier(p.identifier);
+          }
+        },
+        onHover: (evt, elements) => {
+          const target = evt.native?.target;
+          if (!target) return;
+          const clickable = elements.some((el) => {
+            const p = chart.data.datasets[el.datasetIndex].data[el.index];
+            return p?.has_stamp && p.identifier;
+          });
+          target.style.cursor = clickable ? "pointer" : "default";
+        },
         scales: {
           x: {
             type: "linear",

@@ -53,6 +53,14 @@ def test_band_sets_differ():
     assert SC("ztf").bands == ("g", "r", "i")
 
 
+def test_fp_url_builders():
+    assert "forced-photometry" in SC("lsst").fp_url("170226393632735260")
+    assert "oid=170226393632735260" in SC("lsst").fp_url("170226393632735260")
+    ztf_url = SC("ztf").fp_url("ZTF21abc")
+    assert "v2/lightcurve/lightcurve/ZTF21abc" in ztf_url
+    assert "survey_id=ztf" in ztf_url
+
+
 def test_extinction_coefficients_match_fitzpatrick():
     assert SC("lsst").extinction_r["r"] == pytest.approx(2.273)
     assert SC("ztf").extinction_r["g"] == pytest.approx(3.237)
