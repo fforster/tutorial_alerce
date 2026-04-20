@@ -106,8 +106,7 @@ def test_detail_renders_container(client):
     assert r.status_code == 200
     assert "Back to results" in r.text
     assert "/htmx/object_information?oid=ZTF21abc&survey_id=ztf" in r.text
-    # Later-slice placeholders
-    assert "slice 4" in r.text
+    # Remaining placeholders (stamps, Aladin) for later slices
     assert "slice 5" in r.text
     assert "slice 6" in r.text
 
@@ -140,6 +139,69 @@ def test_object_information_renders_basic_fields(client, monkeypatch):
     assert "-30:00:00.00" in r.text
     assert "60000.000" in r.text
     assert "ALeRCE Explorer" in r.text
+
+
+def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
+    async def fake_lc(*, survey, oid):
+        return {
+            "survey": survey,
+            "bands": [
+                {"name": "g", "points": [{"mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0, "candid": "1"}]},
+                {"name": "r", "points": [{"mjd": 60001.0, "flux": 1500.0, "e_flux": 15.0, "candid": "2"}]},
+            ],
+            "n_det": 2,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lightcurve",
+        fake_lc,
+    )
+    r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert 'id="lc-canvas-ZTF21abc"' in r.text
+    assert "data-lc=" in r.text
+    # JSON payload is embedded; spot-check a value.
+    assert "60000" in r.text
+    assert "2 detections" in r.text
+
+
+def test_lightcurve_empty_shows_message(client, monkeypatch):
+    async def fake_lc(*, survey, oid):
+        return {"survey": survey, "bands": [], "n_det": 0}
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lightcurve",
+        fake_lc,
+    )
+    r = client.get("/htmx/lightcurve?oid=x&survey_id=lsst")
+    assert r.status_code == 200
+    assert "No detections" in r.text
+    assert "data-lc=" not in r.text
+
+
+def test_lightcurve_rejects_unknown_survey(client):
+    r = client.get("/htmx/lightcurve?oid=x&survey_id=panstarrs")
+    assert r.status_code == 400
+
+
+def test_lightcurve_upstream_error_renders_message(client, monkeypatch):
+    async def fake_lc(*, survey, oid):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lightcurve",
+        fake_lc,
+    )
+    r = client.get("/htmx/lightcurve?oid=x&survey_id=ztf")
+    assert r.status_code == 200
+    assert "Upstream error" in r.text
+
+
+def test_detail_container_wires_lightcurve_slot(client):
+    r = client.get("/htmx/detail?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf" in r.text
+    assert 'id="lightcurve-slot"' in r.text
 
 
 def test_object_information_upstream_error_renders_message(client, monkeypatch):

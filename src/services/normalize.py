@@ -90,9 +90,12 @@ def normalize_lsst(d: dict[str, Any]) -> dict[str, Any]:
         mag = AB_ZP_NJY - 2.5 * math.log10(flux)
         if flux_err is not None:
             e_mag = (2.5 / math.log(10.0)) * (flux_err / flux)
+    band_raw = d.get("band")
+    band_map = d.get("band_map") or {}
+    band_letter = band_map.get(str(band_raw)) if band_raw is not None else None
     return {
         "mjd": d.get("mjd"),
-        "band": d.get("band"),
+        "band": band_letter if band_letter is not None else band_raw,
         "psf_flux": flux,
         "e_psf_flux": flux_err,
         "science_flux": d.get("scienceFlux"),

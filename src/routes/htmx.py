@@ -6,6 +6,7 @@ fragment so htmx can swap them into the results slot.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from ..services import classifiers as classifiers_service
+from ..services import lightcurve as lightcurve_service
 from ..services import object_info as object_info_service
 from ..services import object_list as object_list_service
 from ..services.survey_config import known_surveys
@@ -29,6 +31,8 @@ router = APIRouter()
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR), autoescape=True, auto_reload=True)
 templates.env.globals["API_URL"] = os.getenv("API_URL", "http://localhost:8000")
+# `tojson` filter produces JS-safe JSON for embedding in data-* attributes.
+templates.env.filters["tojson_compact"] = lambda v: json.dumps(v, separators=(",", ":"))
 
 
 def _validate_survey(survey: str) -> None:
@@ -128,6 +132,23 @@ async def detail(request: Request, oid: str, survey_id: str) -> HTMLResponse:
         request,
         "object_detail/container.html.jinja",
         {"oid": oid, "survey_id": survey_id},
+    )
+
+
+@router.get("/htmx/lightcurve", response_class=HTMLResponse)
+async def lightcurve(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    _validate_survey(survey_id)
+    try:
+        data = await lightcurve_service.get_lightcurve(survey=survey_id, oid=oid)
+    except Exception as e:
+        log.exception("lightcurve failed")
+        return HTMLResponse(
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
+        )
+    return templates.TemplateResponse(
+        request,
+        "lightcurve/lightcurvePreview.html.jinja",
+        {"lc": data, "oid": oid, "survey_id": survey_id},
     )
 
 

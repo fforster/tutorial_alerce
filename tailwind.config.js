@@ -1,7 +1,11 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   prefix: "tw-",
-  content: ["./src/templates/**/*.html.jinja", "./src/static/js/**/*.js"],
+  content: [
+    "./src/templates/**/*.html.jinja",
+    "./src/static/js/**/*.js",
+    "./src/routes/**/*.py",
+  ],
   darkMode: "class",
   theme: {
     extend: {

@@ -17,6 +17,7 @@ class SurveyConfig:
     classifiers_path: str
     objects_path: str
     object_path_template: str  # uses {oid}
+    lightcurve_url_template: str  # full URL; uses {oid}
     bands: tuple[str, ...]
     default_classifier: str
     has_forced_phot: bool
@@ -32,6 +33,9 @@ class SurveyConfig:
 
     def object_url(self, oid: str) -> str:
         return self.api_base + self.object_path_template.format(oid=oid)
+
+    def lightcurve_url(self, oid: str) -> str:
+        return self.lightcurve_url_template.format(oid=oid)
 
 
 def _ztf_extra_params(params: dict[str, object]) -> dict[str, object]:
@@ -60,6 +64,10 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
         classifiers_path="classifier_api/classifiers",
         objects_path="object_api/list_objects",
         object_path_template="object_api/object?survey_id=lsst&oid={oid}",
+        lightcurve_url_template=(
+            "https://api-lsst.alerce.online/lightcurve_api/lightcurve"
+            "?survey_id=lsst&oid={oid}"
+        ),
         bands=("u", "g", "r", "i", "z", "y"),
         default_classifier="lc_classifier_top",
         has_forced_phot=False,
@@ -76,6 +84,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
         classifiers_path="classifiers",
         objects_path="objects",
         object_path_template="objects/{oid}",
+        lightcurve_url_template="https://api.alerce.online/ztf/v1/objects/{oid}/lightcurve",
         bands=("g", "r", "i"),
         default_classifier="lc_classifier",
         has_forced_phot=True,
