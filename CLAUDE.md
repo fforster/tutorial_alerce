@@ -60,6 +60,7 @@ Key endpoint families already implemented in production (reuse these names):
 | `GET /htmx/list_objects` | Main results table with pagination + sortable column headers |
 | `GET /htmx/side_objects` | Sidebar list of objects (alternate view of the same results) |
 | `GET /htmx/object_information` | Basic information panel for one object (oid + survey_id) |
+| `GET /htmx/features` | Feature table modal (version/band/filter picker + CSV download); survey-gated on `SurveyConfig.features_url_template` |
 | `GET /htmx/tns/` | TNS lookup by RA/Dec |
 
 ### Jinja template conventions
@@ -78,6 +79,7 @@ Key endpoint families already implemented in production (reuse these names):
 - `hx-vals='js:{...send_form_Data(), ...send_pagination_data({{next}}), ...send_order_data(...)}'` — client-side JS helpers compose the query string from form state. This means **some client JS remains** to read DOM state and hand it back to htmx.
 - `hx-ext="response-targets"` on the outer div so 4xx/5xx responses can target a different error region.
 - Dependent dropdowns: the classifier `<span>` has `hx-get=".../classes_select" hx-trigger="change" hx-target="#classes_options" hx-swap="innerHTML" hx-vals='js:{...send_classes_data()}'`, so picking a classifier re-fetches the matching class options as an HTML fragment.
+- **Scoped loading indicators** — prefer `.htmx-indicator-scoped` (defined in `tailwind.css` under `@layer components`) over the built-in `.htmx-indicator` for any spinner that sits inside a swap target. The built-in class uses a descendant combinator (`.htmx-request .htmx-indicator`) and leaks across unrelated requests: a `htmx.ajax(..., '#results-slot')` lights up every `.htmx-indicator` inside that slot. The scoped variant only reacts when htmx puts `.htmx-request` on the indicator element itself via `hx-indicator`.
 
 ### Where client-side JS still lives
 
@@ -109,6 +111,7 @@ These are the traps — read the referenced sections in `../ALeRCE_explorer/CLAU
 8. **FITS pipeline** — gzip detection by magic bytes, 2880-byte block parsing, BZERO/BSCALE, asinh stretch on z-scaled percentiles, Y-flip only when `CDELT2 > 0`, North-up rotation via the CD matrix.
 9. **Periodogram** — Generalized Lomb-Scargle with inverse-variance weighting, frequency grid `df = 1/(oversample·T)`, time-centered to reduce trig-argument magnitude, multi-harmonic score (sum of power at 1f–6f, NH=6) to suppress aliases, parabolic peak refinement.
 10. **HiPS probing** — uses FITS cutouts (not JPEG) so compression artifacts don't fake coverage.
+11. **Feature-extractor version selection** — the ZTF features endpoint bundles *every* version ever run on an object (~5 versions, ~180 rows each), no "current" flag. `src/services/features.py::pick_default_version` picks strictly-matched `N.N.N` versions (three pure-integer dot-separated segments), sorted `(first, second, third)` DESC — so `27.5.6` beats `27.5.0` beats legacy labels like `lc_classifier_1.2.1-P` or partial `25.0.1a8` whose third segment isn't a pure integer. **This helper is shared between the features-table modal default and the light-curve fold-period extractor** (`src/services/lightcurve.py::_extract_multiband_period`); the two must agree, otherwise the displayed `Multiband_period` and the period used for folding drift apart (original ZTF20acuwouz bug).
 
 ## External services the port depends on
 
@@ -133,7 +136,7 @@ These are the traps — read the referenced sections in `../ALeRCE_explorer/CLAU
 poetry install              # Python
 npm install                 # Tailwind CLI only
 
-# Run tests (126 total — services + route fragments; upstream calls monkeypatched)
+# Run tests (~190 total — services + route fragments; upstream calls monkeypatched)
 python3 -m pytest           # full suite
 python3 -m pytest tests/test_object_info.py -v   # single file
 python3 -m pytest -k "detail"                     # by keyword
@@ -169,14 +172,27 @@ src/
     normalize.py             # ZTF mag↔nJy conversion (AB ZP 31.4) — feeds the light curve
     probability.py           # classifier → probability list fetch + shaping for the radar panel
     coord_residuals.py       # (Δra, Δdec) per detection relative to the object's mean position
+    features.py              # feature-table fetch + shape_features (per-version grouping, band labels);
+                             # pick_default_version (strict N.N.N) shared with LC fold-period extractor
+    lightcurve.py            # LC shaping + _extract_multiband_period (uses pick_default_version so the
+                             # fold period matches the Multiband_period shown in the features modal)
   templates/
     base.html.jinja                           # DOCTYPE shell + CSS/JS imports
     index.html.jinja                          # app shell (header, sidebar slot, main slot)
     input.html.jinja                          # shared input() macro
     search_form/                              # filter form + dependent class select
     main_table_objects/objects_table.html.jinja   # results table (rows are hx-get to /htmx/detail)
-    basic_information/basicInformationPreview.html.jinja   # populated object info panel
-    object_detail/container.html.jinja        # detail view (back + info + LC/stamps/aladin/radar/residuals)
+    basic_information/basicInformationPreview.html.jinja   # populated object info panel:
+                             # 2-col layout (RA/Dec/MJDs | counts/flags), inline HMS/Deg toggle +
+                             # copy icon (green ✓ feedback) on the RA/Dec rows; Show features +
+                             # Other archives share a bottom action row; features-loading spinner
+                             # uses .htmx-indicator-scoped so Back-to-results doesn't light it up.
+    features/featuresTable.html.jinja         # features modal (lazy-loaded into #features-modal):
+                             # version/band/filter picker, CSV download (oid_features_version_ts.csv),
+                             # default version chosen via pick_default_version (strict N.N.N).
+    object_detail/container.html.jinja        # detail view (back + info + LC/stamps/aladin/radar/residuals);
+                             # exposes #features-modal as an empty overlay slot — the Show features
+                             # button hx-get populates it, close button clears it.
     lightcurve/lightcurvePreview.html.jinja   # Chart.js light curve + cycle-button toggles + z/E(B-V) inputs
     stamps/stampsPreview.html.jinja           # science/template/difference triplet (FITS for LSST, PNG for ZTF)
     aladin/aladinPreview.html.jinja           # Aladin Lite sky viewer + spec-z overlay chips
@@ -188,7 +204,11 @@ src/
     chart-js/chartjs-plugin-zoom.min.js, hammer.min.js  # zoom/pan gestures
     css/tailwind.css         # @tailwind directives (source)
     css/main.css             # compiled Tailwind output (npm run build:css)
-    js/helpers.js            # send_form_Data, send_pagination_data, send_classes_data
+    js/helpers.js            # send_form_Data, send_pagination_data, send_classes_data;
+                             # backToResults() (URL-derived: reads window.location so the detail
+                             # route's HX-Push-Url acts as the source of truth, instead of the
+                             # search form whose dependent class-name select can be empty on first
+                             # render); #results-slot HTML cache for instant back-navigation.
     js/selection.js          # window._selectedIdentifier + Chart plugin; syncs LC↔stamps↔residuals
     js/lightcurve.js         # Chart.js LC + cycle-button toggles (flux/mag, diff/sci, app/abs, obs/der)
     js/stamps.js             # FITS parsing + asinh stretch + WCS rotation for LSST stamps
@@ -231,4 +251,7 @@ tests/                       # pytest; each service file has a matching test fil
 - **Slice 5** — stamps (science/template/difference): in-browser FITS pipeline for LSST (asinh stretch, WCS rotation, N-up via CD matrix), PNG for ZTF. Cross-panel selection: clicking a point in the LC highlights the matching stamp and vice versa (`selection.js`).
 - **Slice 6** — Aladin Lite sky viewer with HiPS survey chooser and 10-catalog VizieR spec-z overlay (`specz.js`: DESI DR1, SDSS DR16, SDSS DR16 QSO, 6dFGS, GAMA DR4, 2MRS, WiggleZ, zCOSMOS, VIPERS PDR2, OzDES DR1). Clicking a host-galaxy source fills the redshift input in the LC panel.
 - **Post-Slice 6** — radar panel (classifier probabilities), coord-residuals panel ((Δra, Δdec) scatter), cross-panel selection synced through `window._selectedIdentifier` + Chart plugin.
+- **Features modal** — `/htmx/features` endpoint + `featuresTable.html.jinja` lazy-loaded into the `#features-modal` overlay slot. Version/band/filter picker, CSV download (`{oid}_features_{version}_{timestamp}.csv`). Default version picked by the strict `N.N.N` helper (`pick_default_version`), shared with the LC fold-period extractor so the displayed `Multiband_period` and the folding period always agree. Survey-gated via `SurveyConfig.features_url_template` (LSST returns `available=False`). Spinner uses `.htmx-indicator-scoped` to avoid spurious firing during unrelated `#results-slot` requests.
+- **Basic Information panel rework** — 2-column data grid, inline compact HMS/Deg toggle + copy-icon with green ✓ / red ✗ feedback on the RA/Dec rows, Show features + Other archives consolidated into a shared bottom action row.
+- **Deep-link Back navigation** — `backToResults()` derives the listing URL from `window.location` (authoritative thanks to the detail route's `HX-Push-Url`) instead of reading the search form, whose dependent class-name select may not have the chosen class hydrated on first render. The result HTML is cached in `window._lastResultsHtml`; fallback calls `/htmx/list_objects` only on true deep-links.
 - **Deferred** — crossmatch, periodogram (in-browser GLS), airmass, name resolver.

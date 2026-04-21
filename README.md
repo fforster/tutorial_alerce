@@ -18,6 +18,15 @@ Milky-Way extinction), science/template/difference stamps (in-browser FITS
 parsing for LSST, PNG for ZTF), an Aladin Lite sky viewer with spec-z
 overlays from 10 VizieR catalogs, a classifier radar, and a coordinate
 residuals scatter. LC ↔ stamps ↔ residuals selection is synced.
+
+The basic-info panel has a 2-column layout, inline HMS/Deg coord toggle +
+copy-icon (green ✓ feedback), and a bottom action row with **Show features**
+(lazy-loaded feature table modal: version/band/filter picker + CSV
+download) alongside the **Other archives** dropdown. The feature-extractor
+version chosen for the modal default is the same one used to fold the
+light curve, so the displayed `Multiband_period` and the folding period
+never disagree.
+
 Crossmatch, periodogram, airmass, and name resolver are still deferred.
 
 ## Install
@@ -71,7 +80,12 @@ src/
     coordinates.py        ra_to_hms / dec_to_dms
     other_archives.py     External archive URL builders
     classifiers.py        Dedupe + merge classifier/class options
+    features.py           Feature-table fetch + pick_default_version (strict N.N.N picker,
+                          shared with LC fold-period extractor)
+    lightcurve.py         LC shaping + Multiband_period extractor (uses pick_default_version)
   templates/              Jinja2 partials, grouped by feature sub-area
+                          (basic_information/, features/, object_detail/, lightcurve/,
+                           stamps/, aladin/, radar/, coord_residuals/, search_form/, ...)
   static/
     css/tailwind.css      Tailwind entry; compiles to main.css
     htmx/htmx.min.js      Self-hosted htmx 1.9.12
