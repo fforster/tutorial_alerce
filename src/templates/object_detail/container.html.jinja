@@ -15,21 +15,28 @@
 >
 
   <div class="tw-flex tw-items-center tw-gap-2">
+    {# Restores the previously cached listing HTML (no network call). Falls
+       back to /htmx/list_objects only if no cache exists (deep-link). #}
     <button
       type="button"
-      class="tw-px-3 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
-      hx-get="{{ API_URL }}/htmx/list_objects"
-      hx-target="#results-slot"
-      hx-swap="innerHTML"
-      hx-indicator="#results-loading"
-      hx-vals='js:{...send_form_Data()}'
+      class="tw-px-3 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded tw-flex-none"
+      onclick="backToResults()"
     >← Back to results</button>
-    <div class="tw-text-xs tw-text-text-muted">{{ survey_id|upper }} · {{ oid }}</div>
+    {# Page-of-OIDs chip row — populated by object_nav.js from window._resultsNav.
+       Current OID is highlighted; chips are click-to-navigate. Horizontal scroll
+       so 20 long LSST ids fit without wrapping the header. #}
+    {# Single-row, font-size auto-scaled in JS to fit container width (see
+       fitOidListFont in object_nav.js). #}
+    <div
+      id="object-nav-list"
+      class="tw-flex tw-items-center tw-gap-0.5 tw-min-w-0 tw-flex-1 tw-overflow-hidden tw-whitespace-nowrap mono"
+      style="font-size: 12px;"
+    ></div>
     {# Prev/next arrows walk through the current page of results; when the
        current OID is at the edge they hop to the previous/next page and pick
        the appropriate sibling. Keyboard ArrowLeft/ArrowRight mirror them.
        Hidden by default — object_nav.js reveals them iff nav state exists. #}
-    <div id="object-nav" class="tw-ml-auto tw-hidden tw-items-center tw-gap-2">
+    <div id="object-nav" class="tw-hidden tw-items-center tw-gap-2 tw-flex-none">
       <button
         type="button"
         id="object-nav-prev"

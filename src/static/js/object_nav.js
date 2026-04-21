@@ -73,12 +73,71 @@
     return readNavFromTable(tpl.content);
   }
 
+  function renderOidList(nav, currentOid) {
+    const list = document.getElementById("object-nav-list");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!nav || !nav.oids || !nav.oids.length) return;
+    const frag = document.createDocumentFragment();
+    nav.oids.forEach((o) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.oid = o;
+      const active = String(o) === String(currentOid);
+      // Active chip gets accent border + filled background; inactive chips
+      // are muted and pick up the accent on hover.
+      // Font size is driven by the parent (scaled to fit in fitOidListFont);
+      // per-chip classes only carry padding, border, and active-state colors.
+      btn.className = active
+        ? "tw-px-1 tw-py-0 tw-rounded tw-border tw-border-accent tw-bg-accent/20 tw-text-text-primary tw-leading-tight tw-flex-none"
+        : "tw-px-1 tw-py-0 tw-rounded tw-border tw-border-border tw-text-text-muted tw-leading-tight hover:tw-text-text-primary hover:tw-border-accent tw-flex-none";
+      btn.textContent = o;
+      btn.title = o;
+      frag.appendChild(btn);
+    });
+    list.appendChild(frag);
+    fitOidListFont(list);
+    observeOidListWidth();
+  }
+
+  // Shrink the container's font-size until all chips fit in one row (no
+  // scroll). Baseline is 12px; floor is 6px so text stays legible. Uses
+  // scrollWidth/clientWidth, so the measurement is real-DOM accurate.
+  function fitOidListFont(list) {
+    const MAX_PX = 12;
+    const MIN_PX = 6;
+    list.style.fontSize = MAX_PX + "px";
+    // One reflow-inducing read is enough — if it fits at max, we're done.
+    if (list.scrollWidth <= list.clientWidth + 1) return;
+    const ratio = list.clientWidth / list.scrollWidth;
+    const px = Math.max(MIN_PX, Math.floor(MAX_PX * ratio * 0.98));
+    list.style.fontSize = px + "px";
+  }
+
+  // Re-fit when the container's own width changes — catches both window
+  // resize and sidebar toggle (which doesn't trigger a window resize event).
+  // Installed once per list element to survive htmx swaps.
+  function observeOidListWidth() {
+    const list = document.getElementById("object-nav-list");
+    if (!list || list.$roObserved) return;
+    list.$roObserved = true;
+    if (typeof ResizeObserver === "undefined") return;
+    let timer = null;
+    new ResizeObserver(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (list.children.length) fitOidListFont(list);
+      }, 50);
+    }).observe(list);
+  }
+
   function updateButtons() {
     const wrap = document.getElementById("object-nav");
     if (!wrap) return;
     const nav = window._resultsNav;
     const oid = currentDetailOid();
     const posEl = document.getElementById("object-nav-position");
+    renderOidList(nav, oid);
     if (!nav || !nav.oids || !nav.oids.length || !oid) {
       wrap.classList.add("tw-hidden");
       wrap.classList.remove("tw-flex");
@@ -162,9 +221,19 @@
     navObject(ev.key === "ArrowRight" ? "next" : "prev");
   }
 
+  // Delegate chip clicks on the list container (survives htmx swaps because
+  // we listen on document, and the list is re-populated in place).
+  function onListClick(ev) {
+    const btn = ev.target.closest("#object-nav-list button[data-oid]");
+    if (!btn) return;
+    ev.preventDefault();
+    openDetail(btn.dataset.oid);
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     refreshNavState(document);
     document.addEventListener("keydown", onKeydown);
+    document.addEventListener("click", onListClick);
   });
   document.addEventListener("htmx:afterSwap", (evt) => {
     refreshNavState(evt.detail.target);

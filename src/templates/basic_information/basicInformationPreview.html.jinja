@@ -5,7 +5,19 @@
 <div id="basic-info" class="tw-h-full tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-sm">
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-3">
     <div>
-      <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Basic Information</div>
+      {% from "_panel_help.html.jinja" import panel_help %}
+      {% call panel_help("Basic Information") %}
+        <div class="tw-font-semibold tw-mb-1">What's shown</div>
+        <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+          <li><strong class="tw-text-text-primary">RA / Dec</strong> — mean position in decimal degrees and HMS/DMS</li>
+          <li><strong class="tw-text-text-primary">First / Last MJD</strong> — time span of detections (Δ MJD is the extent)</li>
+          <li><strong class="tw-text-text-primary">N det / N non-det</strong> — detection and non-detection counts</li>
+          <li><strong class="tw-text-text-primary">N forced</strong> — LSST forced-photometry count (when available)</li>
+          <li><strong class="tw-text-text-primary">Corrected / Stellar</strong> — ZTF only: whether host-galaxy correction was applied, and a stellarity flag</li>
+        </ul>
+        <div class="tw-font-semibold tw-mb-1">Other archives ▾</div>
+        <p class="tw-text-text-secondary">Dropdown with links to external catalogs and services (ALeRCE, NED, SIMBAD, TNS, etc.) pre-populated with this object's coordinates.</p>
+      {% endcall %}
       <div class="mono tw-text-base tw-mt-1">{{ info.oid }}</div>
       <div class="tw-text-text-muted tw-text-xs tw-mt-1">Survey: {{ survey_id }}</div>
     </div>

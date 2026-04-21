@@ -7,10 +7,25 @@
 #}
 <div class="tw-h-full tw-flex tw-flex-col tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-2 tw-gap-3">
-    <div
-      class="tw-text-text-secondary tw-text-xs tw-uppercase"
-      title="Zoom: scroll wheel. Box-zoom: drag. Pan: ctrl+drag. Reset: double-click."
-    >Position residuals</div>
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Position residuals", side="right") %}
+      <div class="tw-font-semibold tw-mb-1">What's plotted</div>
+      <p class="tw-mb-3 tw-text-text-secondary">Each detection's offset from the object's mean position — Δ RA·cos(δ) on X, Δ Dec on Y, both in arcseconds. Axes are symmetric so the origin sits at centre.</p>
+      <div class="tw-font-semibold tw-mb-1">How to read it</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>Color encodes MJD (viridis: purple → yellow = old → new)</li>
+        <li>A time-ordered drift (moving object, asteroid) reads as a coloured track</li>
+        <li>A stationary source clusters around the origin</li>
+        <li>Points with stamps are click-to-sync (same as the light curve)</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Navigation</div>
+      <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>Zoom: mouse wheel</li>
+        <li>Box-zoom: drag (no modifier)</li>
+        <li>Pan: <span class="mono">Ctrl</span> + drag</li>
+        <li>Reset: double-click, or the <em>Reset zoom</em> button</li>
+      </ul>
+    {% endcall %}
     <div class="tw-flex tw-items-center tw-gap-3">
       <div
         class="tw-text-text-muted tw-text-xs"

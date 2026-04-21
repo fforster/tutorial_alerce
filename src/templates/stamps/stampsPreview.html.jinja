@@ -24,7 +24,27 @@
   {% endfor %}
 >
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-3 tw-gap-3">
-    <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Stamps</div>
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Stamps") %}
+      <div class="tw-font-semibold tw-mb-1">What you're looking at</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">Science</strong> — the raw survey image at this detection's epoch</li>
+        <li><strong class="tw-text-text-primary">Template</strong> — the reference image subtracted from the science frame</li>
+        <li><strong class="tw-text-text-primary">Difference</strong> — science − template (where the alert came from)</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Survey specifics</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>LSST: FITS cutouts parsed in-browser (asinh stretch, WCS rotated so north is up)</li>
+        <li>ZTF: PNG thumbnails from the ALeRCE stamp service</li>
+        <li>Top-right arrows on each stamp point North / East</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Controls</div>
+      <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>Dropdown: switch to a different epoch — MJD + band listed</li>
+        <li><span class="mono">−</span> / <span class="mono">+</span> / reset: zoom all three stamps in sync, centred on the object</li>
+        <li>Clicking a point in the light curve or position residuals panel jumps to that epoch here</li>
+      </ul>
+    {% endcall %}
     {% if ctx.detections %}
       {# Zoom controls operate on all three stamps simultaneously. The object
          sits at the centre of each stamp (survey-cutout contract), so a

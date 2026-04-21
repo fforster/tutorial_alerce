@@ -8,7 +8,19 @@
 #}
 <div id="aladin-panel" class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-2">
-    <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Sky view</div>
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Sky view", side="right") %}
+      <div class="tw-font-semibold tw-mb-1">What's shown</div>
+      <p class="tw-mb-3 tw-text-text-secondary">Aladin Lite sky viewer centred on the object, backed by HiPS imagery (DESI → PanSTARRS → SkyMapper → DSS fallback depending on coverage).</p>
+      <div class="tw-font-semibold tw-mb-1">Navigation</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>Pan: drag</li>
+        <li>Zoom: scroll wheel or pinch</li>
+        <li>Imagery / overlay picker: toolbar at top-right of the viewer</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Host-galaxy spec-z</div>
+      <p class="tw-text-text-secondary">Coloured chips mark VizieR catalog sources (DESI DR1, SDSS DR16, 6dFGS, GAMA, 2MRS, WiggleZ, zCOSMOS, VIPERS PDR2, OzDES DR1). Click a chip to populate the <em>z</em> input in the light-curve panel — useful for absolute-magnitude mode.</p>
+    {% endcall %}
     <div id="aladin-legend-{{ oid }}" class="tw-text-xs tw-text-text-muted tw-font-mono"></div>
   </div>
 

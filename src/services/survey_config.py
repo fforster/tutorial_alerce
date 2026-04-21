@@ -36,6 +36,10 @@ class SurveyConfig:
     default_classifier: str
     has_forced_phot: bool
     has_science_flux: bool
+    # Features endpoint (ZTF only so far). Used to fetch `Multiband_period` for
+    # the phase-folding button in the light curve panel. None means the survey
+    # doesn't publish features via the REST API.
+    features_url_template: str | None = None
     extinction_r: dict[str, float] = field(default_factory=dict)
     extra_params: Callable[[dict[str, object]], dict[str, object]] = lambda p: p
 
@@ -64,6 +68,11 @@ class SurveyConfig:
 
     def prob_url(self, oid: str) -> str:
         return self.prob_url_template.format(oid=oid)
+
+    def features_url(self, oid: str) -> str | None:
+        if not self.features_url_template:
+            return None
+        return self.features_url_template.format(oid=oid)
 
 
 def _ztf_extra_params(params: dict[str, object]) -> dict[str, object]:
@@ -150,6 +159,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
             "difference": "difference",
         },
         prob_url_template="https://api.alerce.online/ztf/v1/objects/{oid}/probabilities",
+        features_url_template="https://api.alerce.online/ztf/v1/objects/{oid}/features",
         bands=("g", "r", "i"),
         default_classifier="lc_classifier",
         has_forced_phot=True,

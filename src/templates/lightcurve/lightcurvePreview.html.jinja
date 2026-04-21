@@ -6,10 +6,27 @@
 #}
 <div class="tw-h-full tw-flex tw-flex-col tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-2 tw-gap-3">
-    <div
-      class="tw-text-text-secondary tw-text-xs tw-uppercase"
-      title="Zoom: scroll wheel. Box-zoom: shift+drag. Pan: ctrl+drag. Reset: double-click."
-    >Light curve</div>
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Light curve") %}
+      <div class="tw-font-semibold tw-mb-1">Navigating the chart</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>Zoom: mouse wheel (or pinch on touch)</li>
+        <li>Box-zoom: <span class="mono">Shift</span> + drag</li>
+        <li>Pan: <span class="mono">Ctrl</span> + drag</li>
+        <li>Reset zoom: double-click the chart, or the <em>Reset zoom</em> button</li>
+        <li>Select a detection: click a point (syncs the stamps panel)</li>
+        <li>Inspect a point: hover for value, error, band, MJD</li>
+        <li>Toggle a band on/off: click its entry in the legend</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Axis toggles (top-right)</div>
+      <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">Diff ↔ Sci</strong> — difference vs. science flux (ZTF has science only with a reference; LSST always)</li>
+        <li><strong class="tw-text-text-primary">Flux ↔ Mag</strong> — linear nJy ↔ AB magnitude (ZP 31.4, reversed axis)</li>
+        <li><strong class="tw-text-text-primary">App ↔ Abs</strong> — apparent ↔ absolute (rest-frame @ 10 pc; requires z &gt; 0; Planck-2018 distance modulus)</li>
+        <li><strong class="tw-text-text-primary">Obs ↔ Der</strong> — observed ↔ dereddened (Fitzpatrick 1999, A<sub>λ</sub> = R<sub>λ</sub> × E(B-V) per band; requires E(B-V) &gt; 0)</li>
+        <li><strong class="tw-text-text-primary">ZTF DR</strong> — archival ZTF science photometry at this sky position (cone 1.5″); Sci mode only</li>
+      </ul>
+    {% endcall %}
     <div class="tw-flex tw-items-center tw-gap-3">
       {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
         {#
@@ -121,6 +138,22 @@
               title="Drag to adjust ZTF DR point transparency."
             />
           </div>
+        {% endif %}
+        {#
+          Fold button: only rendered when the feature-table Multiband_period
+          is positive (ZTF only — LSST's features endpoint isn't wired up).
+          The period rides on data-lc-period so the JS can swap between MJD
+          and phase purely client-side.
+        #}
+        {% if lc.multiband_period and lc.multiband_period > 0 %}
+          <button
+            type="button"
+            class="lc-fold-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-bg-bg-tertiary"
+            data-target="lc-canvas-{{ oid }}"
+            data-lc-fold="off"
+            data-lc-period="{{ lc.multiband_period }}"
+            title="Click to fold the light curve at the multiband period ({{ '%.6f'|format(lc.multiband_period) }} d) from the feature table. Two cycles are shown side-by-side."
+          >Fold</button>
         {% endif %}
         <button
           type="button"

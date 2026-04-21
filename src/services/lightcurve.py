@@ -68,6 +68,7 @@ def shape_lightcurve(
     *,
     survey: str,
     fp_raw: list[dict[str, Any]] | None = None,
+    multiband_period: float | None = None,
 ) -> dict[str, Any]:
     cfg = SC(survey)
     det_bands = _bucket_by_band(normalize_dets(raw.get("detections") or [], survey), cfg)
@@ -82,6 +83,11 @@ def shape_lightcurve(
         # Gates the client-side Diff/Sci toggle; LSST doesn't publish absolute
         # science flux so the toggle is hidden entirely there.
         "has_science_flux": cfg.has_science_flux,
+        # `Multiband_period` from the ALeRCE feature table. When present + >0
+        # the Fold button renders in the LC toolbar and the client folds all
+        # detections by this period. None ⇒ button hidden (LSST or ZTF object
+        # without a period-finding score yet).
+        "multiband_period": multiband_period,
     }
 
 
@@ -160,12 +166,56 @@ async def _fetch_fp(url: str | None) -> Any:
         return None
 
 
+def _extract_multiband_period(features: Any) -> float | None:
+    """Pull `Multiband_period` out of the ZTF feature list.
+
+    ALeRCE ships features as a flat list of {name, value, fid?} dicts; the
+    period is the row with name="Multiband_period" (fid is typically 12 for
+    the multiband entry, but we key on name to stay robust). Non-positive or
+    non-finite values map to None so the client knows to hide the Fold button.
+    """
+    if not isinstance(features, list):
+        return None
+    for row in features:
+        if not isinstance(row, dict):
+            continue
+        if row.get("name") != "Multiband_period":
+            continue
+        v = row.get("value")
+        try:
+            p = float(v)
+        except (TypeError, ValueError):
+            return None
+        if p > 0 and p == p:  # reject NaN / non-positive
+            return p
+        return None
+    return None
+
+
+async def _fetch_multiband_period(url: str | None) -> float | None:
+    """Best-effort fetch of the multiband period for the Fold button.
+
+    Mirrors `_fetch_fp`'s error discipline: the light-curve panel must still
+    render if the features endpoint is 404/down/slow. None just means "hide
+    the Fold button" — not a fatal condition.
+    """
+    if url is None:
+        return None
+    try:
+        return _extract_multiband_period(await alerce_client._get(url))
+    except Exception as e:
+        log.warning("features fetch failed (%s): %s", url, e)
+        return None
+
+
 async def get_lightcurve(*, survey: str, oid: str) -> dict[str, Any]:
     cfg = SC(survey)
     fp_url = cfg.fp_url(oid) if cfg.has_forced_phot else None
-    raw, fp_resp = await asyncio.gather(
+    features_url = cfg.features_url(oid)
+    raw, fp_resp, period = await asyncio.gather(
         alerce_client._get(cfg.lightcurve_url(oid)),
         _fetch_fp(fp_url),
+        _fetch_multiband_period(features_url),
     )
     if not isinstance(raw, dict):
         raise ValueError(f"Unexpected lightcurve response shape: {type(raw).__name__}")
@@ -174,4 +224,6 @@ async def get_lightcurve(*, survey: str, oid: str) -> dict[str, Any]:
     if survey == "ztf" and isinstance(raw.get("detections"), list):
         raw["detections"] = _merge_ztf_v2_corr(raw["detections"], fp_resp)
     fp_raw = _extract_fp(fp_resp, survey)
-    return shape_lightcurve(raw, survey=survey, fp_raw=fp_raw)
+    return shape_lightcurve(
+        raw, survey=survey, fp_raw=fp_raw, multiband_period=period,
+    )

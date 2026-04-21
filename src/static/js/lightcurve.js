@@ -46,7 +46,7 @@
   // Only non-default values end up in the URL, matching the "dropped if
   // default" convention in routes/htmx.py::_share_url.
   const LC_DEFAULTS = {
-    mode: "flux", source: "diff", abs: "app", dered: "obs",
+    mode: "flux", source: "diff", abs: "app", dered: "obs", fold: "off",
     z: null, ebv: null, drShown: false, drAlpha: 0.10,
   };
 
@@ -61,6 +61,7 @@
       source: p.get("lc_source") || LC_DEFAULTS.source,
       abs:   p.get("lc_abs")    || LC_DEFAULTS.abs,
       dered: p.get("lc_dered")  || LC_DEFAULTS.dered,
+      fold:  p.get("lc_fold")   || LC_DEFAULTS.fold,
       z:     num("lc_z"),
       ebv:   num("lc_ebv"),
       drShown: p.get("lc_dr") === "on",
@@ -80,6 +81,7 @@
       state.source === LC_DEFAULTS.source &&
       state.abs === LC_DEFAULTS.abs &&
       state.dered === LC_DEFAULTS.dered &&
+      state.fold === LC_DEFAULTS.fold &&
       state.z == null && state.ebv == null &&
       !state.drShown &&
       Math.abs(state.drAlpha - LC_DEFAULTS.drAlpha) < 1e-6;
@@ -98,6 +100,7 @@
       source: chart.$lcSource,
       abs: chart.$lcAbs,
       dered: chart.$lcDered,
+      fold: chart.$lcFold || "off",
       z: chart.$lcZ,
       ebv: chart.$lcEbv,
       drShown: chart.$lcDrShown,
@@ -113,6 +116,7 @@
     setOrDel("lc_source", state.source, LC_DEFAULTS.source);
     setOrDel("lc_abs",    state.abs,    LC_DEFAULTS.abs);
     setOrDel("lc_dered",  state.dered,  LC_DEFAULTS.dered);
+    setOrDel("lc_fold",   state.fold,   LC_DEFAULTS.fold);
     setOrDel("lc_z",      state.z,      null);
     setOrDel("lc_ebv",    state.ebv,    null);
     setOrDel("lc_dr", state.drShown ? "on" : "off", "off");
@@ -241,12 +245,33 @@
     return { x: p.mjd, y, e, yLo, yHi, identifier: p.identifier, has_stamp: p.has_stamp };
   }
 
-  function buildDatasets(bands, fpBands, drBands, axisMode, sourceMode, distMod, extByBand, drAlpha) {
+  // Fold projection: map MJD → phase ∈ [0,1), emit the same point twice at
+  // phase and phase+1 so the user sees two cycles side-by-side (convention
+  // inherited from the prototype — it makes transits/eclipses at the wrap
+  // unambiguous). Non-finite period → no fold (defensive; the button only
+  // renders when the server supplied a positive period).
+  function foldDataset(points, period) {
+    if (!(period > 0)) return points;
+    const out = [];
+    for (const p of points) {
+      if (!p || !isFinite(p.x)) continue;
+      // JS % can yield negatives for pre-epoch MJDs; normalize into [0,1).
+      let phase = (p.x / period) % 1;
+      if (phase < 0) phase += 1;
+      out.push({ ...p, x: phase });
+      out.push({ ...p, x: phase + 1 });
+    }
+    return out;
+  }
+
+  function buildDatasets(bands, fpBands, drBands, axisMode, sourceMode, distMod, extByBand, drAlpha, foldPeriod) {
     const extFor = (name) => (extByBand || {})[name] || 0;
-    const project = (band) =>
-      band.points
+    const project = (band) => {
+      const rows = band.points
         .map((p) => projectPoint(p, axisMode, sourceMode, distMod, extFor(band.name)))
         .filter(Boolean);
+      return foldPeriod ? foldDataset(rows, foldPeriod) : rows;
+    };
     const det = bands.map((b) => ({
       label: b.name,
       data: project(b),
@@ -336,10 +361,23 @@
     // still filters DR in Diff mode (flux=null), so this just avoids stale
     // legend entries when the feature is off.
     const drBands = chart.$lcDrShown ? (chart.$lcDrBands || []) : [];
+    const foldPeriod =
+      chart.$lcFold === "fold" && chart.$lcPeriod > 0 ? chart.$lcPeriod : null;
     chart.data.datasets = buildDatasets(
       raw.bands, raw.fpBands, drBands, axisMode, sourceMode, distMod, extByBand,
-      chart.$lcDrAlpha,
+      chart.$lcDrAlpha, foldPeriod,
     );
+    const x = chart.options.scales.x;
+    if (foldPeriod) {
+      x.title.text = `Phase (P = ${foldPeriod.toPrecision(6)} d)`;
+      // Pin two cycles: [0, 2]. User can still zoom/pan from here.
+      x.min = 0;
+      x.max = 2;
+    } else {
+      x.title.text = "MJD";
+      delete x.min;
+      delete x.max;
+    }
     const y = chart.options.scales.y;
     const sciLabel = sourceMode === "sci" ? "science" : "diff";
     const absPrefix = distMod != null ? "Abs " : "";
@@ -460,7 +498,10 @@
                 const p = ctx.raw;
                 const err = p.e != null ? ` ± ${p.e.toPrecision(3)}` : "";
                 const unit = chart.$lcMode === "mag" ? "mag" : "nJy";
-                return `${ctx.dataset.label}: ${p.y.toPrecision(4)}${err} ${unit} @ MJD ${p.x.toFixed(3)}`;
+                const xLabel = chart.$lcFold === "fold" && chart.$lcPeriod > 0
+                  ? `phase ${p.x.toFixed(3)}`
+                  : `MJD ${p.x.toFixed(3)}`;
+                return `${ctx.dataset.label}: ${p.y.toPrecision(4)}${err} ${unit} @ ${xLabel}`;
               },
             },
           },
@@ -484,6 +525,14 @@
     chart.$lcDered = restored.dered === "dered" ? "dered" : "obs";
     chart.$lcEbv = null;  // set below from input after pre-fill
     chart.$lcExtR = extR;
+    // Fold: the period lives on the Fold button's data-lc-period (rendered
+    // only when the server found a positive Multiband_period). If the button
+    // is absent, we can't honor a restored "fold" state — demote to off so
+    // applyModes doesn't try to fold without a period.
+    const foldBtn = document.querySelector(`.lc-fold-toggle[data-target="${canvas.id}"]`);
+    const period = foldBtn ? parseFloat(foldBtn.dataset.lcPeriod) : NaN;
+    chart.$lcPeriod = isFinite(period) && period > 0 ? period : null;
+    chart.$lcFold = restored.fold === "fold" && chart.$lcPeriod ? "fold" : "off";
     // DR starts hidden + unfetched. The button loads on first click (or at
     // bind-time pre-fetch) and caches the result on the chart so re-toggling
     // doesn't refetch. drAlpha comes from restored state so the DR layer
@@ -542,6 +591,19 @@
   function setCycleValue(btn, spec, value) {
     btn.dataset[spec.dataKey] = value;
     btn.textContent = spec.labels[value];
+    // Buttons that are binary and "this is either on or off" (rather than
+    // projection toggles like Flux/Mag where every value is equally valid)
+    // declare an `activeValue`. The label stays constant; we flip the text
+    // and border to the accent color so the change is visible even while
+    // the cursor is still hovering the button (a text-only flip would be
+    // masked by hover:tw-text-text-primary).
+    if (spec.activeValue) {
+      const active = value === spec.activeValue;
+      btn.classList.toggle("tw-text-accent", active);
+      btn.classList.toggle("tw-border-accent", active);
+      btn.classList.toggle("tw-text-text-muted", !active);
+      btn.classList.toggle("tw-border-border", !active);
+    }
   }
 
   function bindCycleButton(btn, spec) {
@@ -584,6 +646,13 @@
     dered:  { btnSelector: ".lc-dered-toggle",  dataKey: "lcDered",  chartProp: "$lcDered",
               values: ["obs", "dered"], labels: { obs: "Obs", dered: "Der" },
               guard: (chart, v) => v !== "dered" || (chart.$lcEbv != null && chart.$lcEbv > 0) },
+    // Fold: fold-on vs fold-off is a binary state (not a projection axis
+    // like flux/mag), so we keep the label constant and flip the text color
+    // muted→primary via `activeValue` to signal whether folding is on.
+    fold:   { btnSelector: ".lc-fold-toggle",   dataKey: "lcFold",   chartProp: "$lcFold",
+              values: ["off", "fold"], labels: { off: "Fold", fold: "Fold" },
+              activeValue: "fold",
+              guard: (chart, v) => v !== "fold" || (chart.$lcPeriod > 0) },
   };
 
   // Keeps chart state aligned with the z input. If the user clears z while

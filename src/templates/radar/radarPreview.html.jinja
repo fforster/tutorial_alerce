@@ -6,7 +6,19 @@
 #}
 <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
   <div class="tw-flex tw-flex-col tw-items-start tw-gap-2 tw-mb-3">
-    <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Probabilities</div>
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Probabilities") %}
+      <div class="tw-font-semibold tw-mb-1">What's plotted</div>
+      <p class="tw-mb-3 tw-text-text-secondary">Radar chart of class probabilities from the selected classifier. Each axis is a class; the polygon spans 0 to 1. The top class is highlighted so the dominant prediction reads at a glance.</p>
+      <div class="tw-font-semibold tw-mb-1">Classifier picker</div>
+      <p class="tw-mb-3 tw-text-text-secondary">The dropdown lists every classifier that has scored this object (e.g. stamp vs. light-curve classifiers, or different versions). Switching is client-side — all classifier groups arrive with the panel.</p>
+      <div class="tw-font-semibold tw-mb-1">Reading the polygon</div>
+      <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>A single long spike = confident classification</li>
+        <li>Multiple comparable lobes = ambiguous object</li>
+        <li>Hover an axis to see the exact probability</li>
+      </ul>
+    {% endcall %}
     {% if ctx.groups %}
       {# Dropdown sits below the title so it gets the full row; long classifier
          keys are allowed to overflow the panel's right edge rather than wrap. #}

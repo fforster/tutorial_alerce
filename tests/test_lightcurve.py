@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import math
 
-from src.services.lightcurve import _merge_ztf_v2_corr, shape_lightcurve
+from src.services.lightcurve import (
+    _extract_multiband_period,
+    _merge_ztf_v2_corr,
+    shape_lightcurve,
+)
 
 
 def _ztf_det(mjd, fid, magpsf, sigmapsf=0.05, candid="100"):
@@ -237,6 +241,93 @@ def test_merge_ztf_v2_corr_noops_on_bad_fp_shape():
     assert _merge_ztf_v2_corr(v1, None) is v1
     assert _merge_ztf_v2_corr(v1, []) is v1
     assert _merge_ztf_v2_corr(v1, {"detections": "not a list"}) is v1
+
+
+def test_multiband_period_threads_into_shape():
+    raw = {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
+    out = shape_lightcurve(raw, survey="ztf", multiband_period=1.234567)
+    assert out["multiband_period"] == 1.234567
+
+
+def test_multiband_period_defaults_to_none():
+    """Surveys without a features endpoint (LSST) or objects without a
+    period-finding score shouldn't surface the Fold button — None sentinel."""
+    out = shape_lightcurve({"detections": []}, survey="lsst")
+    assert out["multiband_period"] is None
+
+
+def test_extract_multiband_period_finds_named_row():
+    features = [
+        {"name": "Amplitude", "value": 0.5, "fid": 1},
+        {"name": "Multiband_period", "value": 2.345, "fid": 12},
+        {"name": "Period_fit", "value": 0.001, "fid": 12},
+    ]
+    assert _extract_multiband_period(features) == 2.345
+
+
+def test_extract_multiband_period_rejects_sentinels():
+    # None / negative / NaN / non-numeric should all map to None so the
+    # client hides the Fold button instead of folding at junk.
+    assert _extract_multiband_period([{"name": "Multiband_period", "value": None}]) is None
+    assert _extract_multiband_period([{"name": "Multiband_period", "value": -1.0}]) is None
+    assert _extract_multiband_period([{"name": "Multiband_period", "value": float("nan")}]) is None
+    assert _extract_multiband_period([{"name": "Multiband_period", "value": "n/a"}]) is None
+
+
+def test_extract_multiband_period_missing_row_is_none():
+    assert _extract_multiband_period([{"name": "Amplitude", "value": 0.5}]) is None
+    assert _extract_multiband_period([]) is None
+    assert _extract_multiband_period(None) is None
+    assert _extract_multiband_period({"not": "a list"}) is None
+
+
+def test_get_lightcurve_fetches_features_and_threads_period(monkeypatch):
+    """End-to-end: get_lightcurve must call the features endpoint and pass
+    the parsed Multiband_period into shape_lightcurve so the Fold button
+    renders on the template."""
+    import asyncio
+
+    from src.services import alerce_client, lightcurve as lc_mod
+
+    calls: list[str] = []
+
+    async def fake_get(url: str):
+        calls.append(url)
+        if "features" in url:
+            return [
+                {"name": "Amplitude", "value": 0.5},
+                {"name": "Multiband_period", "value": 3.14159},
+            ]
+        if "lightcurve" in url and "v2" in url:
+            # ZTF v2 FP endpoint
+            return {"detections": [], "forced_photometry": []}
+        # ZTF v1 lightcurve
+        return {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
+
+    monkeypatch.setattr(alerce_client, "_get", fake_get)
+    out = asyncio.run(lc_mod.get_lightcurve(survey="ztf", oid="ZTF20abcxyz"))
+    assert out["multiband_period"] == 3.14159
+    assert any("features" in u for u in calls)
+
+
+def test_get_lightcurve_tolerates_features_failure(monkeypatch):
+    """A broken features endpoint shouldn't take the LC panel down — the
+    Fold button is the only casualty."""
+    import asyncio
+
+    from src.services import alerce_client, lightcurve as lc_mod
+
+    async def fake_get(url: str):
+        if "features" in url:
+            raise RuntimeError("features endpoint down")
+        if "v2" in url:
+            return {"detections": [], "forced_photometry": []}
+        return {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
+
+    monkeypatch.setattr(alerce_client, "_get", fake_get)
+    out = asyncio.run(lc_mod.get_lightcurve(survey="ztf", oid="ZTF20abcxyz"))
+    assert out["multiband_period"] is None
+    assert out["n_det"] == 1
 
 
 def test_shape_lightcurve_picks_up_merged_e_sci_flux_end_to_end():

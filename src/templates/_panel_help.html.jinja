@@ -1,0 +1,26 @@
+{#
+  Reusable panel-title tooltip. Import as a macro:
+
+      {% from "_panel_help.html.jinja" import panel_help %}
+      {{ panel_help("Light curve", caller) }}
+
+  The body is provided by the caller block — use {% call panel_help("…") %}
+  and put <ul>/<p> etc. inside. Shows on hover or keyboard focus; positioned
+  absolutely below the title with z-50 so it overlays sibling panels.
+
+  `side` = "left" (default) or "right" anchors the tooltip's horizontal edge —
+  right-edge panels use "right" so the card doesn't overflow the viewport.
+#}
+{% macro panel_help(title, side="left") %}
+<div class="tw-relative tw-group">
+  <div class="tw-text-text-secondary tw-text-xs tw-uppercase tw-cursor-help tw-underline tw-decoration-dotted tw-underline-offset-2" tabindex="0">
+    {{ title }} <span class="tw-text-text-muted tw-normal-case">(?)</span>
+  </div>
+  <div
+    role="tooltip"
+    class="tw-hidden group-hover:tw-block group-focus-within:tw-block tw-absolute tw-z-50 tw-top-full {% if side == 'right' %}tw-right-0{% else %}tw-left-0{% endif %} tw-mt-2 tw-w-80 tw-max-w-[calc(100vw-2rem)] tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-3 tw-text-xs tw-text-text-primary tw-normal-case tw-shadow-lg tw-leading-relaxed"
+  >
+    {{ caller() }}
+  </div>
+</div>
+{% endmacro %}

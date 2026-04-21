@@ -62,3 +62,58 @@ window.send_form_Data = send_form_Data;
 window.send_pagination_data = send_pagination_data;
 window.send_order_data = send_order_data;
 window.send_classes_data = send_classes_data;
+
+// Results cache. Every time #results-slot lands on a listing (i.e. contains
+// #objects_table), we snapshot the HTML + the URL that was pushed for it.
+// The "Back to results" button restores from this cache instead of re-firing
+// the upstream ALeRCE API query — which means no network call, no spinner,
+// and no perceptible delay.
+(function () {
+  document.addEventListener("htmx:afterSwap", (evt) => {
+    const t = evt.detail && evt.detail.target;
+    if (!t || t.id !== "results-slot") return;
+    // Auto-hide the search panel when drilling into a detail; auto-show it
+    // when returning to a listing. The toggle button remains the manual
+    // override — users can re-open the panel mid-detail if they want.
+    if (t.querySelector("#object-detail") && window.setSearchPanelVisible) {
+      window.setSearchPanelVisible(false);
+    } else if (t.querySelector("#objects_table") && window.setSearchPanelVisible) {
+      window.setSearchPanelVisible(true);
+    }
+    if (!t.querySelector("#objects_table")) return;
+    window._lastResultsHtml = t.innerHTML;
+    window._lastResultsUrl = window.location.pathname + window.location.search;
+  });
+
+  function restoreFromCache() {
+    const slot = document.getElementById("results-slot");
+    if (!slot || !window._lastResultsHtml) return false;
+    slot.innerHTML = window._lastResultsHtml;
+    // Re-scan for hx-* attributes on rows/pagination so they become active.
+    if (window.htmx && window.htmx.process) window.htmx.process(slot);
+    if (window._lastResultsUrl) {
+      window.history.pushState({}, "", window._lastResultsUrl);
+    }
+    // Synthetic afterSwap so object_nav.js (and anyone else listening) re-reads
+    // the table's data-nav and refreshes the chip row / arrow state.
+    document.dispatchEvent(new CustomEvent("htmx:afterSwap", {
+      detail: { target: slot },
+    }));
+    return true;
+  }
+
+  function backToResults() {
+    if (restoreFromCache()) return;
+    // No cache (e.g. the user deep-linked straight into a detail view); fall
+    // back to the original re-fetch path.
+    const filters = send_form_Data();
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v != null && v !== "") params.append(k, String(v));
+    });
+    const url = `/htmx/list_objects?${params.toString()}`;
+    if (window.htmx) window.htmx.ajax("GET", url, "#results-slot");
+  }
+
+  window.backToResults = backToResults;
+})();
