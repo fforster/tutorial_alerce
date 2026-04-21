@@ -19,6 +19,7 @@ import logging
 from typing import Any
 
 from . import alerce_client
+from .features import pick_default_version
 from .normalize import normalize_dets
 from .survey_config import SC
 
@@ -169,27 +170,43 @@ async def _fetch_fp(url: str | None) -> Any:
 def _extract_multiband_period(features: Any) -> float | None:
     """Pull `Multiband_period` out of the ZTF feature list.
 
-    ALeRCE ships features as a flat list of {name, value, fid?} dicts; the
-    period is the row with name="Multiband_period" (fid is typically 12 for
-    the multiband entry, but we key on name to stay robust). Non-positive or
-    non-finite values map to None so the client knows to hide the Fold button.
+    The endpoint bundles *every* extractor version ever run on the object
+    (~5 versions per object), each with its own Multiband_period. We must
+    pick the same version the features-table modal defaults to, or the user
+    sees one period in the table and a different one under the folded light
+    curve (the ZTF20acuwouz bug).
+
+    Strategy: collect versions in first-seen order, delegate version
+    selection to `pick_default_version` (shared with the modal), and return
+    that version's Multiband_period. Non-positive / non-finite / missing
+    values return None so the client hides the Fold button — matching what
+    the modal would display as "—" for that same version.
     """
     if not isinstance(features, list):
         return None
+    versions_seen: list[str] = []
+    versions_set: set[str] = set()
+    values: dict[str, float] = {}
     for row in features:
         if not isinstance(row, dict):
             continue
+        version = row.get("version") or "—"
+        if version not in versions_set:
+            versions_set.add(version)
+            versions_seen.append(version)
         if row.get("name") != "Multiband_period":
             continue
         v = row.get("value")
         try:
             p = float(v)
         except (TypeError, ValueError):
-            return None
+            continue
         if p > 0 and p == p:  # reject NaN / non-positive
-            return p
+            values[version] = p
+    chosen = pick_default_version(versions_seen)
+    if chosen is None:
         return None
-    return None
+    return values.get(chosen)
 
 
 async def _fetch_multiband_period(url: str | None) -> float | None:

@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..services import classifiers as classifiers_service
 from ..services import coord_residuals as coord_residuals_service
+from ..services import features as features_service
 from ..services import lightcurve as lightcurve_service
 from ..services import object_info as object_info_service
 from ..services import object_list as object_list_service
@@ -418,8 +419,33 @@ async def object_information(request: Request, oid: str, survey_id: str) -> HTML
         return HTMLResponse(
             f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
         )
+    # has_features drives whether the Basic-Info panel renders the
+    # "Show features" button. Survey-level flag (config-driven) rather than
+    # a hard-coded survey check so LSST lights up automatically once its
+    # features endpoint is wired into SurveyConfig.
     return templates.TemplateResponse(
         request,
         "basic_information/basicInformationPreview.html.jinja",
-        {"info": info, "survey_id": survey_id},
+        {
+            "info": info,
+            "survey_id": survey_id,
+            "has_features": SC(survey_id).features_url_template is not None,
+        },
+    )
+
+
+@router.get("/htmx/features", response_class=HTMLResponse)
+async def features(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    _validate_survey(survey_id)
+    try:
+        ctx = await features_service.get_features(survey=survey_id, oid=oid)
+    except Exception as e:
+        log.exception("features failed")
+        return HTMLResponse(
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
+        )
+    return templates.TemplateResponse(
+        request,
+        "features/featuresTable.html.jinja",
+        {"ctx": ctx, "oid": oid, "survey_id": survey_id},
     )

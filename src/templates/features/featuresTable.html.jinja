@@ -1,0 +1,241 @@
+{#
+  Features table modal — rendered by /htmx/features into #features-modal.
+
+  ctx shape: {
+    available: bool,
+    rows: [{name, band, value_display, version}],
+    versions: [str],              # first-seen order; last entry is the default
+    default_version: str | None,
+    n_by_version: {version: int},
+    n: int,
+  }
+
+  The modal bundles *all* versions' rows into the DOM once (each tr carries
+  `data-version`); the <select> hides everything but the active version, so
+  swapping versions is instant and doesn't require a round-trip.
+
+  Dismissal: ✕ button, backdrop click, or Escape — all clear
+  #features-modal's innerHTML.
+#}
+<div
+  id="features-modal-inner"
+  class="tw-fixed tw-inset-0 tw-z-40 tw-flex tw-items-center tw-justify-center tw-bg-black/70"
+  onclick="if (event.target === this) document.getElementById('features-modal').innerHTML = ''"
+  data-default-version="{{ ctx.default_version or '' }}"
+  data-oid="{{ oid }}"
+>
+  <div
+    class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-shadow-xl tw-w-full tw-max-w-3xl tw-max-h-[80vh] tw-flex tw-flex-col tw-m-4"
+  >
+    <div class="tw-flex tw-items-center tw-justify-between tw-p-3 tw-border-b tw-border-border tw-gap-3">
+      <div class="tw-min-w-0">
+        <div class="tw-text-sm tw-font-semibold tw-truncate">Features — {{ oid }}</div>
+        <div class="features-count-banner tw-text-xs tw-text-text-muted">
+          {% if ctx.available and ctx.versions %}
+            <span class="features-visible-count">{{ ctx.n_by_version[ctx.default_version] }}</span> features · version <span class="mono">{{ ctx.default_version }}</span>
+          {% elif ctx.available %}
+            No features reported for this object.
+          {% else %}
+            Feature table not published for {{ survey_id|upper }} yet.
+          {% endif %}
+        </div>
+      </div>
+      <button
+        type="button"
+        class="tw-text-sm tw-text-text-muted hover:tw-text-text-primary tw-px-2 tw-py-1 tw-flex-none"
+        onclick="document.getElementById('features-modal').innerHTML = ''"
+        title="Close (Esc)"
+      >✕</button>
+    </div>
+
+    {% if ctx.available and ctx.rows %}
+      {#
+        Two-row toolbar: filters on row 1, actions on row 2. A single row
+        overflowed on narrower widths (version + band + long placeholder +
+        download button wouldn't fit without wrapping awkwardly).
+      #}
+      <div class="tw-p-3 tw-border-b tw-border-border tw-flex tw-flex-col tw-gap-2">
+        <div class="tw-flex tw-items-center tw-gap-2">
+          {#
+            Version picker — mirrors the radar panel's classifier select. Sits
+            to the left so the user sees "pick a version" before filtering.
+            Option labels include the row count so the user can spot versions
+            with partial coverage without switching to them.
+          #}
+          <label class="tw-text-xs tw-text-text-muted tw-whitespace-nowrap">Version</label>
+          <select
+            class="features-version-select tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary mono"
+          >
+            {% for v in ctx.versions %}
+              <option value="{{ v }}" {% if v == ctx.default_version %}selected{% endif %}>
+                {{ v }} ({{ ctx.n_by_version[v] }})
+              </option>
+            {% endfor %}
+          </select>
+          {#
+            Band picker separate from the name text input. A single combined
+            substring-filter misfired: typing "g" for g-band also matched
+            feature names like "Galactic", "Mag_…". An exact-match band
+            <select> sidesteps the collision.
+          #}
+          <label class="tw-text-xs tw-text-text-muted tw-whitespace-nowrap">Band</label>
+          <select
+            class="features-band-select tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary mono"
+          >
+            <option value="">All</option>
+            {% for b in ctx.bands %}
+              <option value="{{ b }}">{{ b }}</option>
+            {% endfor %}
+          </select>
+          <input
+            type="search"
+            class="features-filter-input tw-flex-1 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary"
+            placeholder="Filter by feature name (e.g. Period, Amplitude)…"
+            autofocus
+          />
+        </div>
+        <div class="tw-flex tw-items-center tw-justify-end">
+          {#
+            Download exports the *full* active-version dataset (name, band, value),
+            not the filtered view — the filename encodes {version} so users can
+            diff across versions without remembering what filter was active.
+          #}
+          <button
+            type="button"
+            class="features-download-btn tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded tw-flex-none"
+            title="Download the selected version's features as CSV."
+          >Download CSV</button>
+        </div>
+      </div>
+      <div class="tw-overflow-auto tw-flex-1">
+        <table class="tw-w-full tw-text-xs mono">
+          <thead class="tw-sticky tw-top-0 tw-bg-bg-card tw-border-b tw-border-border">
+            <tr class="tw-text-text-secondary">
+              <th class="tw-text-left tw-px-3 tw-py-2 tw-font-semibold">Name</th>
+              <th class="tw-text-left tw-px-3 tw-py-2 tw-font-semibold tw-w-16">Band</th>
+              <th class="tw-text-right tw-px-3 tw-py-2 tw-font-semibold">Value</th>
+            </tr>
+          </thead>
+          <tbody class="features-tbody">
+            {% for r in ctx.rows %}
+              <tr class="features-row tw-border-b tw-border-border/50 hover:tw-bg-bg-tertiary"
+                  data-version="{{ r.version }}"
+                  data-name-lc="{{ r.name|lower }}"
+                  data-band-lc="{{ r.band|lower }}">
+                <td class="tw-px-3 tw-py-1 tw-text-text-primary">{{ r.name }}</td>
+                <td class="tw-px-3 tw-py-1 tw-text-text-secondary">{{ r.band }}</td>
+                <td class="tw-px-3 tw-py-1 tw-text-right tw-text-text-primary">{{ r.value_display }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif ctx.available %}
+      <div class="tw-text-xs tw-text-text-muted tw-p-6 tw-text-center">
+        No features reported for this object.
+      </div>
+    {% else %}
+      <div class="tw-text-xs tw-text-text-muted tw-p-6 tw-text-center">
+        The ALeRCE {{ survey_id|upper }} API doesn't publish a feature table yet.
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  const modal = document.getElementById("features-modal-inner");
+  if (!modal) return;
+  const select = modal.querySelector(".features-version-select");
+  const input = modal.querySelector(".features-filter-input");
+  const rows = modal.querySelectorAll("tr.features-row");
+  const visibleCountEl = modal.querySelector(".features-visible-count");
+  const banner = modal.querySelector(".features-count-banner");
+
+  // Central "apply both filters" pass. Hide every row that isn't on the
+  // active version, then within that set hide rows whose name/band don't
+  // substring-match the filter. We also keep the header count live so the
+  // user sees how many rows the current filter is letting through.
+  const bandSelect = modal.querySelector(".features-band-select");
+  function apply() {
+    const version = select ? select.value : modal.dataset.defaultVersion;
+    const band = bandSelect ? bandSelect.value : "";
+    const q = input ? input.value.trim().toLowerCase() : "";
+    let visible = 0;
+    rows.forEach((row) => {
+      if (row.dataset.version !== version) { row.style.display = "none"; return; }
+      // Band filter is exact match (empty value = "All"); avoids the
+      // "g matches Galactic" footgun of a combined substring filter.
+      if (band && row.dataset.bandLc !== band.toLowerCase()) {
+        row.style.display = "none";
+        return;
+      }
+      if (q && !row.dataset.nameLc.includes(q)) {
+        row.style.display = "none";
+        return;
+      }
+      row.style.display = "";
+      visible += 1;
+    });
+    if (visibleCountEl) visibleCountEl.textContent = String(visible);
+    if (banner) {
+      // Rewrite the "N features · version X" banner so the version label
+      // tracks the select. Keeps the visible-count span intact.
+      const versionSpan = banner.querySelector(".mono");
+      if (versionSpan) versionSpan.textContent = version;
+    }
+  }
+  if (select) select.addEventListener("change", apply);
+  if (bandSelect) bandSelect.addEventListener("change", apply);
+  if (input) input.addEventListener("input", apply);
+  apply();
+
+  // CSV download: exports every row on the active version (ignores the
+  // name/band filter — the filename encodes the version, so the file
+  // represents "version X", not "what was on screen").
+  const downloadBtn = modal.querySelector(".features-download-btn");
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", () => {
+      const version = select ? select.value : modal.dataset.defaultVersion;
+      const oid = modal.dataset.oid || "object";
+      // RFC 4180-ish: wrap every field in quotes, double embedded quotes.
+      // Feature names are identifier-like but values come from the API so
+      // quoting defensively is cheaper than auditing every possible glyph.
+      const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
+      const lines = ["name,band,value"];
+      rows.forEach((row) => {
+        if (row.dataset.version !== version) return;
+        const cells = row.querySelectorAll("td");
+        if (cells.length < 3) return;
+        lines.push([
+          quote(cells[0].textContent.trim()),
+          quote(cells[1].textContent.trim()),
+          quote(cells[2].textContent.trim()),
+        ].join(","));
+      });
+      // ISO timestamp with colons/dots stripped so the filename is portable
+      // across filesystems (Windows rejects ':').
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${oid}_features_${version}_${ts}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  // Dismiss on Escape — one-shot listener torn down when the modal is
+  // cleared (since the <script> block dies with its DOM on the next swap).
+  function onKey(e) {
+    if (e.key !== "Escape") return;
+    const host = document.getElementById("features-modal");
+    if (host) host.innerHTML = "";
+    document.removeEventListener("keydown", onKey);
+  }
+  document.addEventListener("keydown", onKey);
+})();
+</script>

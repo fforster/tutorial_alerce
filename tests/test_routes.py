@@ -381,10 +381,106 @@ def test_object_information_renders_basic_fields(client, monkeypatch):
     r = client.get("/htmx/object_information?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
     assert "ZTF21abc" in r.text
+    # Both coord formats land in the markup (the sexagesimal form is stashed
+    # on data-sex so the toggle can swap it in without a round-trip).
     assert "12:00:00.000" in r.text
     assert "-30:00:00.00" in r.text
+    assert 'data-sex="12:00:00.000"' in r.text
+    assert 'data-sex="-30:00:00.00"' in r.text
+    # Coord toolbar: format toggle + copy button both present when ra/dec exist.
+    assert "coord-format-toggle" in r.text
+    assert "coord-copy-btn" in r.text
     assert "60000.000" in r.text
     assert "ALeRCE Explorer" in r.text
+    # ZTF has a features endpoint, so the "Show features" button should render.
+    assert "Show features" in r.text
+    assert "/htmx/features?oid=ZTF21abc&survey_id=ztf" in r.text
+
+
+def test_object_information_hides_features_button_for_lsst(client, monkeypatch):
+    """LSST has no features_url_template — the button must not render."""
+    async def fake_info(*, survey, oid):
+        return {
+            "oid": oid, "survey": survey, "ra": 1.0, "dec": 2.0,
+            "ra_hms": "00:04:00.000", "dec_dms": "+02:00:00.00",
+            "firstmjd": 60000.0, "lastmjd": 60001.0, "delta_mjd": 1.0,
+            "n_det": 1, "n_non_det": 0, "n_forced": 1,
+            "corrected": None, "stellar": None, "archives": [],
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
+    )
+    r = client.get("/htmx/object_information?oid=9123456789012345&survey_id=lsst")
+    assert r.status_code == 200
+    assert "Show features" not in r.text
+
+
+def test_features_route_renders_table_with_version_picker(client, monkeypatch):
+    async def fake_features(*, survey, oid):
+        return {
+            "available": True,
+            "rows": [
+                {"name": "Amplitude", "band": "g", "value_display": "0.5",
+                 "version": "v_old"},
+                {"name": "Multiband_period", "band": "multi",
+                 "value_display": "1.234", "version": "v_new"},
+            ],
+            "versions": ["v_old", "v_new"],
+            "default_version": "v_new",
+            "n_by_version": {"v_old": 1, "v_new": 1},
+            "n": 2,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.features_service.get_features",
+        fake_features,
+    )
+    r = client.get("/htmx/features?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "Amplitude" in r.text
+    assert "Multiband_period" in r.text
+    # Version select renders both options with their counts.
+    assert "features-version-select" in r.text
+    assert "v_old (1)" in r.text
+    assert "v_new (1)" in r.text
+    # The default version's count drives the banner.
+    assert "features-visible-count" in r.text
+    # Filter input still present.
+    assert "features-filter-input" in r.text
+    # Download button renders so users can export the active version.
+    assert "features-download-btn" in r.text
+    assert 'data-oid="ZTF21abc"' in r.text
+
+
+def test_features_route_shows_unavailable_for_lsst(client, monkeypatch):
+    async def fake_features(*, survey, oid):
+        return {
+            "available": False, "rows": [], "n": 0,
+            "versions": [], "n_by_version": {}, "default_version": None,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.features_service.get_features",
+        fake_features,
+    )
+    r = client.get("/htmx/features?oid=1&survey_id=lsst")
+    assert r.status_code == 200
+    assert "doesn't publish a feature table" in r.text
+
+
+def test_features_route_renders_upstream_error(client, monkeypatch):
+    async def boom(*, survey, oid):
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(
+        "src.routes.htmx.features_service.get_features",
+        boom,
+    )
+    r = client.get("/htmx/features?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "Upstream error" in r.text
 
 
 def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):

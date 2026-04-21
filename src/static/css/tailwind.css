@@ -13,3 +13,23 @@
     font-family: "IBM Plex Mono", ui-monospace, monospace;
   }
 }
+
+@layer components {
+  /* Scoped loading-indicator variant. htmx's built-in `.htmx-indicator`
+     pairs with two CSS rules: one matches the indicator itself, the other
+     matches any descendant of an element with `.htmx-request`. The
+     descendant rule leaks: unrelated requests that add `.htmx-request` to
+     a common ancestor (e.g. `htmx.ajax('GET', …, '#results-slot')` from
+     Back-to-results) light up every `.htmx-indicator` inside that slot.
+     This variant drops the descendant rule and only reacts when htmx puts
+     `.htmx-request` on the indicator element itself — which `hx-indicator`
+     does explicitly on the button's own request. Use this instead of
+     `.htmx-indicator` for indicators that sit inside swap targets. */
+  .htmx-indicator-scoped {
+    opacity: 0;
+    transition: opacity 200ms ease-in;
+  }
+  .htmx-indicator-scoped.htmx-request {
+    opacity: 1;
+  }
+}

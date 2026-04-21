@@ -104,15 +104,21 @@ window.send_classes_data = send_classes_data;
 
   function backToResults() {
     if (restoreFromCache()) return;
-    // No cache (e.g. the user deep-linked straight into a detail view); fall
-    // back to the original re-fetch path.
-    const filters = send_form_Data();
-    const params = new URLSearchParams();
-    Object.entries(filters).forEach(([k, v]) => {
-      if (v != null && v !== "") params.append(k, String(v));
-    });
-    const url = `/htmx/list_objects?${params.toString()}`;
-    if (window.htmx) window.htmx.ajax("GET", url, "#results-slot");
+    // No cache (deep-linked straight into a detail view). Use the current
+    // URL as the source of truth rather than the form state — the detail
+    // route's HX-Push-Url already encodes every filter (classifier,
+    // class_name, probability, etc.), so stripping the detail-only keys
+    // (`oid`, `identifier`) gives us exactly the listing the user was
+    // implicitly viewing. Reading from the form was unreliable: its
+    // dependent class_name select can still be empty on first render (the
+    // class list is rendered server-side only when the classifier's class
+    // list includes the chosen class), and any hydration hiccup silently
+    // dropped the filter on Back.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("oid");
+    url.searchParams.delete("identifier");
+    const listUrl = `/htmx/list_objects?${url.searchParams.toString()}`;
+    if (window.htmx) window.htmx.ajax("GET", listUrl, "#results-slot");
   }
 
   window.backToResults = backToResults;

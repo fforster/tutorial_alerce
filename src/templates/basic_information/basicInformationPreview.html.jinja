@@ -3,79 +3,281 @@
   Expects `info` (shape_object_info output) and `survey_id`.
 #}
 <div id="basic-info" class="tw-h-full tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-sm">
-  <div class="tw-flex tw-items-center tw-justify-between tw-mb-3">
-    <div>
-      {% from "_panel_help.html.jinja" import panel_help %}
-      {% call panel_help("Basic Information") %}
-        <div class="tw-font-semibold tw-mb-1">What's shown</div>
-        <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
-          <li><strong class="tw-text-text-primary">RA / Dec</strong> — mean position in decimal degrees and HMS/DMS</li>
-          <li><strong class="tw-text-text-primary">First / Last MJD</strong> — time span of detections (Δ MJD is the extent)</li>
-          <li><strong class="tw-text-text-primary">N det / N non-det</strong> — detection and non-detection counts</li>
-          <li><strong class="tw-text-text-primary">N forced</strong> — LSST forced-photometry count (when available)</li>
-          <li><strong class="tw-text-text-primary">Corrected / Stellar</strong> — ZTF only: whether host-galaxy correction was applied, and a stellarity flag</li>
-        </ul>
-        <div class="tw-font-semibold tw-mb-1">Other archives ▾</div>
-        <p class="tw-text-text-secondary">Dropdown with links to external catalogs and services (ALeRCE, NED, SIMBAD, TNS, etc.) pre-populated with this object's coordinates.</p>
-      {% endcall %}
-      <div class="mono tw-text-base tw-mt-1">{{ info.oid }}</div>
-      <div class="tw-text-text-muted tw-text-xs tw-mt-1">Survey: {{ survey_id }}</div>
-    </div>
-
-    {% if info.archives %}
-    <details class="tw-relative">
-      <summary class="tw-cursor-pointer tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded">
-        Other archives ▾
-      </summary>
-      <div class="tw-absolute tw-right-0 tw-mt-1 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-p-2 tw-min-w-48 tw-z-10 tw-shadow-lg">
-        {% for link in info.archives %}
-          <a href="{{ link.url }}" target="_blank" rel="noopener"
-             class="tw-block tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary hover:tw-bg-bg-tertiary tw-rounded">
-            {{ link.name }}
-          </a>
-        {% endfor %}
-      </div>
-    </details>
-    {% endif %}
+  <div class="tw-mb-3">
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Basic Information") %}
+      <div class="tw-font-semibold tw-mb-1">What's shown</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">RA / Dec</strong> — mean position in decimal degrees and HMS/DMS</li>
+        <li><strong class="tw-text-text-primary">First / Last MJD</strong> — time span of detections (Δ MJD is the extent)</li>
+        <li><strong class="tw-text-text-primary">N det / N non-det</strong> — detection and non-detection counts</li>
+        <li><strong class="tw-text-text-primary">N forced</strong> — LSST forced-photometry count (when available)</li>
+        <li><strong class="tw-text-text-primary">Corrected / Stellar</strong> — ZTF only: whether host-galaxy correction was applied, and a stellarity flag</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Other archives ▾</div>
+      <p class="tw-text-text-secondary">Dropdown (at the bottom of the panel) with links to external catalogs and services (ALeRCE, NED, SIMBAD, TNS, etc.) pre-populated with this object's coordinates.</p>
+    {% endcall %}
+    <div class="mono tw-text-base tw-mt-1">{{ info.oid }}</div>
+    <div class="tw-text-text-muted tw-text-xs tw-mt-1">Survey: {{ survey_id }}</div>
   </div>
 
-  <dl class="tw-grid tw-grid-cols-[auto_1fr] tw-gap-x-4 tw-gap-y-1 tw-text-xs">
-    <dt class="tw-text-text-secondary">RA</dt>
-    <dd class="mono">
-      {% if info.ra is not none %}{{ "%.5f"|format(info.ra) }}{% if info.ra_hms %} <span class="tw-text-text-muted">({{ info.ra_hms }})</span>{% endif %}{% else %}-{% endif %}
-    </dd>
+  {#
+    Two-column layout: position + time on the left, counts + flags on the
+    right. Conditional fields (N forced on LSST, Corrected/Stellar on ZTF)
+    land on the right so the left column's row count stays stable.
 
-    <dt class="tw-text-text-secondary">Dec</dt>
-    <dd class="mono">
-      {% if info.dec is not none %}{{ "%.5f"|format(info.dec) }}{% if info.dec_dms %} <span class="tw-text-text-muted">({{ info.dec_dms }})</span>{% endif %}{% else %}-{% endif %}
-    </dd>
+    Coord controls (HMS/Deg toggle + copy icon) live inline in the RA/Dec
+    value cells — keeps them visually tied to the rows they act on and
+    frees vertical space in a dense panel. Both render only when both RA
+    and Dec are available (no point offering a copy button with nothing
+    to copy).
+  #}
+  <div class="tw-grid tw-grid-cols-2 tw-gap-x-4">
+    {#
+      3-column grid: label | value | controls. Value column is `auto` so
+      it shrinks to fit the RA/Dec string (no trailing gap between value
+      and button). The controls column is also `auto`, and the buttons
+      inside get `justify-self-start` so they sit flush to the value.
+      Trailing slack absorbs on the right of col 3 automatically because
+      the grid isn't forced to fill the parent. MJD rows use `col-span-2`
+      on the dd so the value can span into the now-empty controls column.
+    #}
+    <dl class="tw-grid tw-grid-cols-[auto_auto_auto] tw-gap-x-2 tw-gap-y-1 tw-text-xs tw-items-center">
+      <dt class="tw-text-text-secondary">RA</dt>
+      <dd class="mono coord-value"
+          data-axis="ra"
+          data-deg="{% if info.ra is not none %}{{ '%.5f'|format(info.ra) }}{% endif %}"
+          data-sex="{{ info.ra_hms or '' }}">
+        {% if info.ra is not none %}{{ "%.5f"|format(info.ra) }}{% else %}-{% endif %}
+      </dd>
+      {% if info.ra is not none and info.dec is not none %}
+      <button
+        type="button"
+        class="coord-format-toggle tw-justify-self-start tw-px-1 tw-text-[10px] tw-leading-none tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+        data-mode="deg"
+        title="Toggle RA/Dec between decimal degrees and sexagesimal (HH:MM:SS ±DD:MM:SS)."
+        aria-pressed="false"
+      >HMS</button>
+      {% else %}
+      <span></span>
+      {% endif %}
 
-    <dt class="tw-text-text-secondary">First MJD</dt>
-    <dd class="mono">{% if info.firstmjd is not none %}{{ "%.3f"|format(info.firstmjd) }}{% else %}-{% endif %}</dd>
+      <dt class="tw-text-text-secondary">Dec</dt>
+      <dd class="mono coord-value"
+          data-axis="dec"
+          data-deg="{% if info.dec is not none %}{{ '%.5f'|format(info.dec) }}{% endif %}"
+          data-sex="{{ info.dec_dms or '' }}">
+        {% if info.dec is not none %}{{ "%.5f"|format(info.dec) }}{% else %}-{% endif %}
+      </dd>
+      {% if info.ra is not none and info.dec is not none %}
+      {#
+        Copy feedback: a tick glyph (green ✓ / red ✗) in a fixed-width span
+        to the right of the icon. Fixed width (`tw-w-3`) reserves the slot
+        so the button doesn't shift when feedback flashes on. Inline-style
+        color in JS avoids pulling palette classes that may not be compiled
+        into the Tailwind output.
+      #}
+      <div class="tw-justify-self-start tw-flex tw-items-center tw-gap-1">
+        <button
+          type="button"
+          class="coord-copy-btn tw-p-0.5 tw-leading-none tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+          title="Copy 'RA Dec' (in the currently-displayed format) to the clipboard."
+          aria-label="Copy RA Dec"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        <span class="coord-copy-msg tw-w-3 tw-text-xs tw-leading-none" role="status" aria-live="polite"></span>
+      </div>
+      {% else %}
+      <span></span>
+      {% endif %}
 
-    <dt class="tw-text-text-secondary">Last MJD</dt>
-    <dd class="mono">{% if info.lastmjd is not none %}{{ "%.3f"|format(info.lastmjd) }}{% else %}-{% endif %}</dd>
+      <dt class="tw-text-text-secondary">First MJD</dt>
+      <dd class="mono tw-col-span-2">{% if info.firstmjd is not none %}{{ "%.3f"|format(info.firstmjd) }}{% else %}-{% endif %}</dd>
 
-    <dt class="tw-text-text-secondary">Δ MJD</dt>
-    <dd class="mono">{% if info.delta_mjd is not none %}{{ "%.3f"|format(info.delta_mjd) }}{% else %}-{% endif %}</dd>
+      <dt class="tw-text-text-secondary">Last MJD</dt>
+      <dd class="mono tw-col-span-2">{% if info.lastmjd is not none %}{{ "%.3f"|format(info.lastmjd) }}{% else %}-{% endif %}</dd>
 
-    <dt class="tw-text-text-secondary">N det</dt>
-    <dd class="mono">{% if info.n_det is not none %}{{ info.n_det }}{% else %}-{% endif %}</dd>
+      <dt class="tw-text-text-secondary">Δ MJD</dt>
+      <dd class="mono tw-col-span-2">{% if info.delta_mjd is not none %}{{ "%.3f"|format(info.delta_mjd) }}{% else %}-{% endif %}</dd>
+    </dl>
 
-    <dt class="tw-text-text-secondary">N non-det</dt>
-    <dd class="mono">{% if info.n_non_det is not none %}{{ info.n_non_det }}{% else %}-{% endif %}</dd>
+    <dl class="tw-grid tw-grid-cols-[auto_1fr] tw-gap-x-3 tw-gap-y-1 tw-text-xs">
+      <dt class="tw-text-text-secondary">N det</dt>
+      <dd class="mono">{% if info.n_det is not none %}{{ info.n_det }}{% else %}-{% endif %}</dd>
 
-    {% if info.n_forced is not none %}
-    <dt class="tw-text-text-secondary">N forced</dt>
-    <dd class="mono">{{ info.n_forced }}</dd>
-    {% endif %}
+      <dt class="tw-text-text-secondary">N non-det</dt>
+      <dd class="mono">{% if info.n_non_det is not none %}{{ info.n_non_det }}{% else %}-{% endif %}</dd>
 
-    {% if survey_id == 'ztf' %}
-    <dt class="tw-text-text-secondary">Corrected</dt>
-    <dd class="mono">{% if info.corrected is not none %}{{ info.corrected }}{% else %}-{% endif %}</dd>
+      {% if info.n_forced is not none %}
+      <dt class="tw-text-text-secondary">N forced</dt>
+      <dd class="mono">{{ info.n_forced }}</dd>
+      {% endif %}
 
-    <dt class="tw-text-text-secondary">Stellar</dt>
-    <dd class="mono">{% if info.stellar is not none %}{{ info.stellar }}{% else %}-{% endif %}</dd>
-    {% endif %}
-  </dl>
+      {% if survey_id == 'ztf' %}
+      <dt class="tw-text-text-secondary">Corrected</dt>
+      <dd class="mono">{% if info.corrected is not none %}{{ info.corrected }}{% else %}-{% endif %}</dd>
+
+      <dt class="tw-text-text-secondary">Stellar</dt>
+      <dd class="mono">{% if info.stellar is not none %}{{ info.stellar }}{% else %}-{% endif %}</dd>
+      {% endif %}
+    </dl>
+  </div>
+
+  {#
+    Bottom action row: Show features + Other archives dropdown. Kept
+    together at the bottom so the header (OID + help button) stays clean.
+    Rendered if either action is available — Show features is gated on
+    `has_features` (LSST doesn't publish features yet); Other archives
+    is gated on `info.archives` being non-empty.
+  #}
+  {% if has_features or info.archives %}
+    <div class="tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-flex tw-items-center tw-gap-2">
+      {% if has_features %}
+      {#
+        hx-indicator="#features-loading" reveals the spinner next to the
+        button while the request is in flight (≥1 s on cold cache). Without
+        feedback the user would double-click, which `hx-disabled-elt="this"`
+        also guards against. `role="status"` + `aria-live="polite"` makes
+        the spinner audible to screen readers.
+      #}
+      <button
+        type="button"
+        class="tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-60 disabled:tw-cursor-wait"
+        hx-get="{{ API_URL }}/htmx/features?oid={{ info.oid }}&survey_id={{ survey_id }}"
+        hx-target="#features-modal"
+        hx-swap="innerHTML"
+        hx-indicator="#features-loading"
+        hx-disabled-elt="this"
+        title="Show the full ALeRCE feature table for this object."
+      >Show features</button>
+      {#
+        `htmx-indicator-scoped` instead of the built-in `htmx-indicator`:
+        the default class reacts to any ancestor with `.htmx-request`, so
+        Back-to-results (which puts `.htmx-request` on `#results-slot`) was
+        lighting up this spinner even though the Show-features button
+        didn't fire. The scoped variant only lights up when htmx adds
+        `.htmx-request` directly to this element via hx-indicator.
+      #}
+      <span
+        id="features-loading"
+        class="htmx-indicator-scoped tw-text-xs tw-text-text-muted tw-whitespace-nowrap"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="tw-inline-block tw-animate-spin">◐</span> Loading features…
+      </span>
+      {% endif %}
+      {% if info.archives %}
+      {#
+        Dropdown opens upward (`tw-bottom-full`) because this row sits at
+        the bottom of the panel — opening downward would overflow the card.
+      #}
+      <details class="tw-relative">
+        <summary class="tw-cursor-pointer tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded">
+          Other archives ▾
+        </summary>
+        <div class="tw-absolute tw-left-0 tw-bottom-full tw-mb-1 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-p-2 tw-min-w-48 tw-z-10 tw-shadow-lg">
+          {% for link in info.archives %}
+            <a href="{{ link.url }}" target="_blank" rel="noopener"
+               class="tw-block tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary hover:tw-bg-bg-tertiary tw-rounded">
+              {{ link.name }}
+            </a>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
+  {% endif %}
 </div>
+
+<script>
+(function () {
+  // Re-runs on every object_information swap because the <script> is part
+  // of the fragment. IIFE-scoped so each run has its own refs; no globals.
+  const root = document.getElementById("basic-info");
+  if (!root) return;
+  const toggle = root.querySelector(".coord-format-toggle");
+  const copyBtn = root.querySelector(".coord-copy-btn");
+  const msg = root.querySelector(".coord-copy-msg");
+  const values = root.querySelectorAll(".coord-value");
+  if (!values.length) return;
+
+  function currentFormat() {
+    // Default "deg" — if the toggle button isn't rendered (only one coord
+    // available, say), we still want the cells to fall back to degrees.
+    return toggle ? toggle.dataset.mode : "deg";
+  }
+
+  function apply() {
+    const mode = currentFormat();
+    values.forEach((cell) => {
+      const next = mode === "sex" ? cell.dataset.sex : cell.dataset.deg;
+      // Blank data-sex (e.g. dec_dms was None) → fall back to the degrees
+      // form rather than showing an empty cell.
+      cell.textContent = next || cell.dataset.deg || "-";
+    });
+    if (toggle) {
+      toggle.textContent = mode === "deg" ? "HMS" : "Deg";
+      toggle.setAttribute("aria-pressed", mode === "sex" ? "true" : "false");
+    }
+  }
+
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      toggle.dataset.mode = currentFormat() === "deg" ? "sex" : "deg";
+      apply();
+    });
+  }
+  apply();
+
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      // Copies the currently-displayed format so "what you see is what you
+      // paste" — don't second-guess the user's choice by re-formatting.
+      const ra = root.querySelector('.coord-value[data-axis="ra"]');
+      const dec = root.querySelector('.coord-value[data-axis="dec"]');
+      const text = `${(ra?.textContent || "").trim()} ${(dec?.textContent || "").trim()}`.trim();
+      if (!text) return;
+      function flash(ok) {
+        if (!msg) return;
+        // Tick glyph instead of text — previous "Copied"/"Copy failed"
+        // labels overflowed onto the coord string. Green/red is set inline
+        // so we don't depend on Tailwind palette classes being compiled.
+        const tick = ok ? "✓" : "✗";
+        msg.textContent = tick;
+        msg.style.color = ok ? "#4ade80" : "#f87171";
+        msg.setAttribute("aria-label", ok ? "Copied" : "Copy failed");
+        // Short confirmation; long enough to catch the eye, short enough not
+        // to linger across a panel swap.
+        setTimeout(() => {
+          if (msg.textContent === tick) {
+            msg.textContent = "";
+            msg.style.color = "";
+            msg.removeAttribute("aria-label");
+          }
+        }, 1500);
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        flash(true);
+      } catch (_e) {
+        // Fallback for contexts where the Clipboard API isn't available
+        // (older browsers, insecure origins): use the textarea + execCommand
+        // trick so the button still works instead of silently failing.
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch (_e2) {}
+        document.body.removeChild(ta);
+        flash(ok);
+      }
+    });
+  }
+})();
+</script>

@@ -281,6 +281,50 @@ def test_extract_multiband_period_missing_row_is_none():
     assert _extract_multiband_period({"not": "a list"}) is None
 
 
+def test_extract_multiband_period_picks_latest_version():
+    """The feature endpoint bundles every extractor version ever run, each
+    with its own Multiband_period. The API appends newest last, and the
+    features-table modal defaults to the last version — the folding period
+    must match that, or the user sees two different periods for one object
+    (seen in the wild on ZTF20acuwouz)."""
+    features = [
+        {"name": "Multiband_period", "value": 0.465, "fid": 12,
+         "version": "lc_classifier_1.2.1-P"},
+        {"name": "Multiband_period", "value": 0.112, "fid": 12,
+         "version": "lc_classifier_1.2.1-P-transitional"},
+        {"name": "Multiband_period", "value": 1.0, "fid": 12, "version": "23.12.26a85"},
+        {"name": "Multiband_period", "value": 10.22, "fid": 12, "version": "25.0.1a8"},
+        {"name": "Multiband_period", "value": 10.16, "fid": 12, "version": "27.5.6"},
+    ]
+    assert _extract_multiband_period(features) == 10.16
+
+
+def test_extract_multiband_period_hides_when_preferred_version_has_no_period():
+    """If the preferred (pattern-ranked) version's Multiband_period is
+    NaN/None, return None so the Fold button is hidden. Matches the
+    features-table modal, which would render "—" for that version and the
+    user shouldn't see a button folding at some other version's period."""
+    features = [
+        {"name": "Multiband_period", "value": 1.5, "version": "25.0.0"},
+        {"name": "Multiband_period", "value": float("nan"), "version": "27.5.6"},
+    ]
+    # 27.5.6 ranks above 25.0.0 by (first, second) DESC; its value is NaN.
+    assert _extract_multiband_period(features) is None
+
+
+def test_extract_multiband_period_ignores_older_versions_with_larger_value():
+    """Pattern-aware version picking beats simple "last-seen wins". An
+    older `lc_classifier_1.2.1-P` value must not be picked over the
+    newer `27.5.6` value (the ZTF20acuwouz case)."""
+    features = [
+        # Order intentionally scrambled to prove we don't rely on list order.
+        {"name": "Multiband_period", "value": 10.16, "version": "27.5.6"},
+        {"name": "Multiband_period", "value": 0.465, "version": "lc_classifier_1.2.1-P"},
+        {"name": "Multiband_period", "value": 1.0, "version": "23.12.26a85"},
+    ]
+    assert _extract_multiband_period(features) == 10.16
+
+
 def test_get_lightcurve_fetches_features_and_threads_period(monkeypatch):
     """End-to-end: get_lightcurve must call the features endpoint and pass
     the parsed Multiband_period into shape_lightcurve so the Fold button
