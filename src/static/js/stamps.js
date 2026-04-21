@@ -13,6 +13,24 @@
 
 (function () {
   const rendered = new WeakSet();
+  // Cached pre-stretched image per canvas. Lets the zoom controls re-blit
+  // without re-fetching / re-parsing FITS on every click.
+  const cache = new WeakMap();
+
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 8;
+
+  function getPanelZoom(panel) {
+    if (!panel) return 1;
+    const z = parseFloat(panel.dataset.zoom || "1");
+    return isFinite(z) && z > 0 ? z : 1;
+  }
+
+  function setPanelZoom(panel, z) {
+    panel.dataset.zoom = String(z);
+    const label = panel.querySelector(".stamps-zoom-reset");
+    if (label) label.textContent = `${z.toFixed(2)}×`;
+  }
 
   async function loadAndRenderFitsStamp(canvas, url) {
     const card = canvas.closest(".tw-relative") || canvas.parentElement;
@@ -39,7 +57,16 @@
 
       const pixels = readFitsImageData(fitsBuf, fits);
       const northAngle = computeNorthAngle(fits.header);
-      renderStampCanvas(canvas, pixels, fits.naxis1, fits.naxis2, northAngle, fits.header);
+      // Stretch once; cache the resulting source canvas so zoom is cheap.
+      const srcCanvas = buildStretchedSrcCanvas(pixels, fits.naxis1, fits.naxis2, fits.header);
+      cache.set(canvas, {
+        srcCanvas,
+        nx: fits.naxis1,
+        ny: fits.naxis2,
+        northAngle,
+        header: fits.header,
+      });
+      redrawStamp(canvas);
 
       if (compassEl) {
         compassEl.textContent = Math.abs(northAngle) > 0.001
@@ -52,6 +79,19 @@
       if (loadingEl) loadingEl.textContent = "stamp error";
       if (compassEl) compassEl.textContent = "";
     }
+  }
+
+  function redrawStamp(canvas) {
+    const cached = cache.get(canvas);
+    if (!cached) return;
+    const panel = canvas.closest("#stamps-panel");
+    const zoom = getPanelZoom(panel);
+    blitStampCanvas(canvas, cached, zoom);
+  }
+
+  function redrawPanelStamps(panel) {
+    if (!panel) return;
+    panel.querySelectorAll("canvas.stamp-canvas").forEach(redrawStamp);
   }
 
   async function gunzip(buffer) {
@@ -198,7 +238,7 @@
     return { vmin, vmax };
   }
 
-  function renderStampCanvas(canvas, pixels, nx, ny, northAngle, header) {
+  function buildStretchedSrcCanvas(pixels, nx, ny, header) {
     const { vmin, vmax } = zscaleStretch(pixels);
     const cdelt2 = header.CD2_2 || header.CDELT2;
     const flipY = (cdelt2 != null && cdelt2 > 0);
@@ -228,16 +268,25 @@
       }
     }
     srcCtx.putImageData(imgData, 0, 0);
+    return srcCanvas;
+  }
 
+  function blitStampCanvas(canvas, cached, zoom) {
+    const { srcCanvas, nx, ny, northAngle, header } = cached;
     const outSize = canvas.width;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, outSize, outSize);
 
+    // Fit-to-canvas baseline × user zoom. Because the transform scales about
+    // the canvas centre (translate then scale), the object — which sits at
+    // the cutout centre — stays anchored while the field of view shrinks.
+    const baseScale = outSize / Math.max(nx, ny);
+    const scale = baseScale * (zoom || 1);
+
     ctx.save();
     ctx.translate(outSize / 2, outSize / 2);
     ctx.rotate(-northAngle);
-    const scale = outSize / Math.max(nx, ny);
     ctx.scale(scale, scale);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(srcCanvas, -nx / 2, -ny / 2, nx, ny);
@@ -354,6 +403,7 @@
       if (!tpl) return;
       canvas.dataset.stampUrl = tpl.replace("__IDENT__", encodeURIComponent(ident));
       rendered.delete(canvas);
+      cache.delete(canvas);
       const card = canvas.closest(".tw-relative") || canvas.parentElement;
       const loadingEl = card?.querySelector(".stamp-loading");
       const compassEl = card?.querySelector(".stamp-compass");
@@ -365,6 +415,19 @@
     });
     const picker = panel.querySelector('select[name="identifier"]');
     if (picker && picker.value !== String(ident)) picker.value = String(ident);
+  };
+
+  // Apply a zoom factor (relative multiplier, or the string "reset") to every
+  // stamp in the panel containing the clicked button. Scaling happens about
+  // the canvas centre in blitStampCanvas, so the object stays put.
+  window.zoomStamps = function (originEl, factor) {
+    const panel = originEl?.closest("#stamps-panel") || document.getElementById("stamps-panel");
+    if (!panel) return;
+    let z = factor === "reset" ? 1 : getPanelZoom(panel) * Number(factor);
+    if (!isFinite(z) || z <= 0) return;
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    setPanelZoom(panel, z);
+    redrawPanelStamps(panel);
   };
 
   document.addEventListener("DOMContentLoaded", () => initAll(document));

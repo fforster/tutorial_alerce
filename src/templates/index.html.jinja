@@ -15,19 +15,40 @@
     <aside class="tw-w-80 tw-flex-shrink-0 tw-bg-bg-secondary tw-border-r tw-border-border tw-overflow-y-auto">
       <div
         id="search-form-slot"
-        hx-get="{{ API_URL }}/htmx/search_objects/"
+        hx-get="{{ API_URL }}/htmx/search_objects/?survey={{ initial_survey }}{% if initial_classifier %}&classifier={{ initial_classifier|urlencode }}{% endif %}"
         hx-trigger="load"
         hx-swap="innerHTML"
       ></div>
     </aside>
 
     <main class="tw-flex-1 tw-overflow-auto tw-p-4">
-      <div
-        id="results-slot"
-        hx-get="{{ API_URL }}/htmx/list_objects"
-        hx-trigger="load"
-        hx-swap="innerHTML"
-      ></div>
+      {#
+        Deep-link hydration: `?oid=…` jumps straight to the object detail;
+        `?classifier=…` (without oid) pre-runs the listing for that filter;
+        fresh `/` keeps the empty-hint default.
+      #}
+      {% if initial_oid %}
+        <div
+          id="results-slot"
+          hx-get="{{ API_URL }}/htmx/detail?oid={{ initial_oid|urlencode }}&survey_id={{ initial_survey }}{% if initial_classifier %}&classifier={{ initial_classifier|urlencode }}{% endif %}{% if initial_identifier %}&identifier={{ initial_identifier|urlencode }}{% endif %}"
+          hx-trigger="load"
+          hx-swap="innerHTML"
+        ></div>
+      {% elif initial_classifier %}
+        <div
+          id="results-slot"
+          hx-get="{{ API_URL }}/htmx/list_objects?survey={{ initial_survey }}&classifier={{ initial_classifier|urlencode }}"
+          hx-trigger="load"
+          hx-swap="innerHTML"
+        ></div>
+      {% else %}
+        <div
+          id="results-slot"
+          hx-get="{{ API_URL }}/htmx/list_objects"
+          hx-trigger="load"
+          hx-swap="innerHTML"
+        ></div>
+      {% endif %}
     </main>
 
   </div>

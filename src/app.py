@@ -25,6 +25,21 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # htmx reads these response headers to drive history/redirects/retargeting;
+    # the browser only surfaces them to JS if they're in Access-Control-Expose-Headers.
+    # Same-origin requests don't need this, but it keeps things working when the
+    # page and API are on different ports (e.g. during local experiments).
+    expose_headers=[
+        "HX-Push-Url",
+        "HX-Replace-Url",
+        "HX-Redirect",
+        "HX-Refresh",
+        "HX-Retarget",
+        "HX-Reswap",
+        "HX-Trigger",
+        "HX-Trigger-After-Settle",
+        "HX-Trigger-After-Swap",
+    ],
 )
 
 app.state.api_url = os.getenv("API_URL", "http://localhost:8000")

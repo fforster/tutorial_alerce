@@ -1,4 +1,21 @@
-<div id="objects_table" class="tw-bg-bg-card tw-border tw-border-border tw-rounded">
+{# `data-nav` exposes the current page's OIDs + pagination state so the detail
+   view's prev/next arrow buttons (and keyboard arrows) can move through the
+   result set — and hop to the next/prev page when they run out of siblings.
+   Rendered on every list_objects swap so it stays in sync with the filters. #}
+<div
+  id="objects_table"
+  class="tw-bg-bg-card tw-border tw-border-border tw-rounded"
+  data-nav='{{ {
+    "oids": objects_list["items"] | map(attribute="oid") | list,
+    "current_page": objects_list["current_page"],
+    "has_prev": objects_list["has_prev"],
+    "has_next": objects_list["has_next"],
+    "prev": objects_list["prev"] if objects_list["has_prev"] else None,
+    "next": objects_list["next"] if objects_list["has_next"] else None,
+    "survey": survey|default(none),
+    "classifier": classifier|default(none),
+  } | tojson_compact }}'
+>
 
   <div id="results-loading" class="htmx-indicator tw-h-1 tw-bg-accent tw-animate-pulse"></div>
 
@@ -22,7 +39,7 @@
         {% for obj in objects_list['items'] %}
           <tr
             class="tw-border-b tw-border-border/50 hover:tw-bg-bg-tertiary tw-cursor-pointer"
-            hx-get="{{ API_URL }}/htmx/detail?oid={{ obj.get('oid', '') }}&survey_id={{ survey }}"
+            hx-get="{{ API_URL }}/htmx/detail?oid={{ obj.get('oid', '')|urlencode }}&survey_id={{ survey }}{% if classifier %}&classifier={{ classifier|urlencode }}{% endif %}"
             hx-target="#results-slot"
             hx-swap="innerHTML"
             hx-indicator="#results-loading"

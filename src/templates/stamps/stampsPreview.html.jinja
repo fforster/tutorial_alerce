@@ -26,6 +26,29 @@
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-3 tw-gap-3">
     <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Stamps</div>
     {% if ctx.detections %}
+      {# Zoom controls operate on all three stamps simultaneously. The object
+         sits at the centre of each stamp (survey-cutout contract), so a
+         pure scale-about-centre keeps it anchored. Handlers live in stamps.js. #}
+      <div class="tw-flex tw-items-center tw-gap-1">
+        <button
+          type="button"
+          class="stamps-zoom-btn tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
+          title="Zoom out"
+          onclick="window.zoomStamps && window.zoomStamps(this, 1/1.25)"
+        >−</button>
+        <button
+          type="button"
+          class="stamps-zoom-reset tw-px-2 tw-py-1 tw-text-xs tw-text-text-muted hover:tw-text-text-primary tw-border tw-border-border tw-rounded mono"
+          title="Reset zoom"
+          onclick="window.zoomStamps && window.zoomStamps(this, 'reset')"
+        >1.00×</button>
+        <button
+          type="button"
+          class="stamps-zoom-btn tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
+          title="Zoom in"
+          onclick="window.zoomStamps && window.zoomStamps(this, 1.25)"
+        >+</button>
+      </div>
       <select
         class="tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary"
         name="identifier"

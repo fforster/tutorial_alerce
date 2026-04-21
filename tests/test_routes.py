@@ -4,6 +4,8 @@ stubs so these run offline.
 """
 from __future__ import annotations
 
+import html as html_lib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -55,6 +57,31 @@ def test_index_shell(client):
     assert "search-form-slot" in r.text
     assert "results-slot" in r.text
     assert "/static/htmx/htmx.min.js" in r.text
+    # Fresh `/` keeps the empty-hint default — no deep-link hydration.
+    assert "/htmx/detail" not in r.text
+
+
+def test_index_deep_link_to_object(client):
+    # `?oid=…` jumps straight to the detail; classifier threads through.
+    r = client.get("/?survey=lsst&oid=LSST-1&classifier=lc_classifier_top")
+    assert r.status_code == 200
+    assert "/htmx/detail?oid=LSST-1&survey_id=lsst&classifier=lc_classifier_top" in r.text
+    # Search form is pre-loaded with the classifier pre-selected server-side.
+    assert "/htmx/search_objects/?survey=lsst&classifier=lc_classifier_top" in r.text
+    assert "/htmx/list_objects" not in r.text
+
+
+def test_index_deep_link_to_filtered_list(client):
+    # `?classifier=…` without oid pre-runs the listing for that filter.
+    r = client.get("/?survey=ztf&classifier=lc_classifier_top")
+    assert r.status_code == 200
+    assert "/htmx/list_objects?survey=ztf&classifier=lc_classifier_top" in r.text
+    assert "/htmx/detail" not in r.text
+
+
+def test_index_rejects_unknown_survey(client):
+    r = client.get("/?survey=panstarrs")
+    assert r.status_code == 400
 
 
 def test_search_form_renders_classifiers(client, stub_services):
@@ -101,10 +128,86 @@ def test_row_is_clickable_with_detail_url(client, stub_services):
     assert "/htmx/detail?oid=LSST-1&survey_id=lsst" in r.text
 
 
+def test_list_objects_emits_data_nav(client, stub_services):
+    # `data-nav` carries the oids + pagination so the detail's ← / → buttons
+    # and keyboard arrows can walk through the result set. The attribute is
+    # HTML-escaped by Jinja's autoescape — decode before asserting JSON shape.
+    r = client.get("/htmx/list_objects?survey=lsst&page=1")
+    assert r.status_code == 200
+    assert "data-nav=" in r.text
+    decoded = html_lib.unescape(r.text)
+    assert '"oids":["LSST-1"]' in decoded
+    assert '"current_page":1' in decoded
+    assert '"has_next":true' in decoded
+    assert '"next":2' in decoded
+
+
+def test_list_objects_empty_still_emits_data_nav(client):
+    # Empty result: `data-nav` is still present (with no oids) so the JS
+    # consistently sees fresh state after every swap.
+    r = client.get("/htmx/list_objects")
+    assert r.status_code == 200
+    assert "data-nav=" in r.text
+    decoded = html_lib.unescape(r.text)
+    assert '"oids":[]' in decoded
+
+
+def test_list_objects_pushes_share_url(client, stub_services):
+    r = client.get("/htmx/list_objects?survey=lsst&classifier=lc_classifier_top&page=1")
+    assert r.status_code == 200
+    # HX-Push-Url updates the browser URL to a shareable form.
+    assert r.headers.get("HX-Push-Url") == "/?survey=lsst&classifier=lc_classifier_top"
+    # Row URL carries the classifier through to the detail request.
+    assert "classifier=lc_classifier_top" in r.text
+
+
+def test_list_objects_without_survey_does_not_push_url(client):
+    r = client.get("/htmx/list_objects")
+    assert r.status_code == 200
+    # No survey → empty hint, no URL to push.
+    assert r.headers.get("HX-Push-Url") in (None, "/")
+
+
+def test_detail_pushes_share_url_with_classifier(client):
+    r = client.get("/htmx/detail?oid=LSST-1&survey_id=lsst&classifier=lc_classifier_top")
+    assert r.status_code == 200
+    assert r.headers.get("HX-Push-Url") == (
+        "/?survey=lsst&oid=LSST-1&classifier=lc_classifier_top"
+    )
+
+
+def test_detail_pushes_share_url_with_identifier(client):
+    # `identifier=…` selects a specific detection in the stamps/highlight panels.
+    r = client.get("/htmx/detail?oid=LSST-1&survey_id=lsst&identifier=777")
+    assert r.status_code == 200
+    assert r.headers.get("HX-Push-Url") == (
+        "/?survey=lsst&oid=LSST-1&identifier=777"
+    )
+    # Stamps slot carries the identifier so the initial render picks the right detection.
+    assert "/htmx/stamps?oid=LSST-1&survey_id=lsst&identifier=777" in r.text
+
+
+def test_index_deep_link_with_identifier(client):
+    r = client.get("/?survey=lsst&oid=LSST-1&identifier=777")
+    assert r.status_code == 200
+    assert (
+        "/htmx/detail?oid=LSST-1&survey_id=lsst&identifier=777" in r.text
+    )
+
+
+def test_search_form_preselects_classifier(client, stub_services):
+    r = client.get("/htmx/search_objects/?survey=lsst&classifier=lc_classifier_top")
+    assert r.status_code == 200
+    # `selected` attribute marks the matching <option>.
+    assert 'value="lc_classifier_top"' in r.text
+    assert "selected" in r.text
+
+
 def test_detail_renders_container(client):
     r = client.get("/htmx/detail?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
     assert "Back to results" in r.text
+    assert r.headers.get("HX-Push-Url") == "/?survey=ztf&oid=ZTF21abc"
     assert "/htmx/object_information?oid=ZTF21abc&survey_id=ztf" in r.text
     assert 'id="stamps-slot"' in r.text
     assert "/htmx/stamps?oid=ZTF21abc&survey_id=ztf" in r.text
@@ -114,6 +217,18 @@ def test_detail_renders_container(client):
     assert "/htmx/probability?oid=ZTF21abc&survey_id=ztf" in r.text
     assert 'id="coord-residuals-slot"' in r.text
     assert "/htmx/coord_residuals?oid=ZTF21abc&survey_id=ztf" in r.text
+    # data-oid on the root lets object_nav.js find the current OID (the URL
+    # can lag by a tick after a client-side navigation).
+    assert 'data-oid="ZTF21abc"' in r.text
+    assert 'data-survey-id="ztf"' in r.text
+    # Prev/next arrow buttons + the wrapper that object_nav.js reveals.
+    assert 'id="object-nav"' in r.text
+    assert 'id="object-nav-prev"' in r.text
+    assert 'id="object-nav-next"' in r.text
+    assert "navObject('prev')" in r.text
+    assert "navObject('next')" in r.text
+    # Position indicator (populated client-side from window._resultsNav).
+    assert 'id="object-nav-position"' in r.text
 
 
 def test_detail_rejects_unknown_survey(client):
@@ -403,6 +518,12 @@ def test_stamps_renders_picker_and_canvases(client, monkeypatch):
     assert 'data-url-template-template=' in r.text
     assert 'data-url-template-difference=' in r.text
     assert "updateStampsForIdentifier" in r.text
+    # Zoom controls — three buttons (−, reset, +) wired to window.zoomStamps.
+    assert "stamps-zoom-btn" in r.text
+    assert "stamps-zoom-reset" in r.text
+    assert "zoomStamps(this, 1/1.25)" in r.text
+    assert "zoomStamps(this, 1.25)" in r.text
+    assert "zoomStamps(this, 'reset')" in r.text
 
 
 def test_stamps_empty_shows_message(client, monkeypatch):

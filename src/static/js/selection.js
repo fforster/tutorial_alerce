@@ -46,7 +46,24 @@
 
   if (typeof Chart !== "undefined") Chart.register(selectionHighlight);
 
-  window._selectedIdentifier = window._selectedIdentifier || null;
+  // URL is the source of truth for a shareable link: if the incoming URL
+  // carries `identifier=…`, seed the selection from it so the first render
+  // of every chart already shows the highlight ring.
+  const urlIdent = new URLSearchParams(window.location.search).get("identifier");
+  window._selectedIdentifier = window._selectedIdentifier || urlIdent || null;
+
+  // Mirror the current selection back into the URL without creating a new
+  // history entry (per-point clicks would flood history otherwise). Handled
+  // client-side because selection state only lives in the browser — the
+  // server's HX-Push-Url already covers survey/oid/classifier.
+  function replaceUrlIdentifier(ident) {
+    try {
+      const url = new URL(window.location.href);
+      if (ident) url.searchParams.set("identifier", String(ident));
+      else url.searchParams.delete("identifier");
+      history.replaceState(history.state, "", url.toString());
+    } catch (e) { /* ignore */ }
+  }
 
   function redrawHighlightedCharts() {
     if (typeof Chart === "undefined") return;
@@ -65,6 +82,7 @@
       window.updateStampsForIdentifier(window._selectedIdentifier);
     }
     redrawHighlightedCharts();
+    replaceUrlIdentifier(window._selectedIdentifier);
   };
 
   // New panels swapped in via htmx should reflect the current selection

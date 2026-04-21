@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -44,13 +45,62 @@ def _validate_survey(survey: str) -> None:
         raise HTTPException(status_code=400, detail=f"Unknown survey: {survey!r}")
 
 
+def _share_url(
+    *,
+    survey: str | None,
+    oid: str | None = None,
+    classifier: str | None = None,
+    identifier: str | None = None,
+) -> str:
+    """Build the shareable `/?...` URL from the pieces that make up the view.
+
+    Kept in one place so the HX-Push-Url header and the server-rendered initial
+    markup can't drift. Empty/None pieces are dropped.
+    """
+    params: list[tuple[str, str]] = []
+    if survey:
+        params.append(("survey", survey))
+    if oid:
+        params.append(("oid", oid))
+    if classifier:
+        params.append(("classifier", classifier))
+    if identifier:
+        params.append(("identifier", identifier))
+    return "/" if not params else f"/?{urlencode(params)}"
+
+
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "index.html.jinja")
+async def index(
+    request: Request,
+    survey: str | None = None,
+    oid: str | None = None,
+    classifier: str | None = None,
+    identifier: str | None = None,
+) -> HTMLResponse:
+    # Query params hydrate the initial view: `?oid=…` jumps straight to the
+    # detail, `?classifier=…` pre-selects the filter dropdown (and pre-runs
+    # the listing), `?identifier=…` pre-selects a specific detection in the
+    # stamps/highlight panels. Fresh `/` keeps the empty-hint default.
+    if survey:
+        _validate_survey(survey)
+    return templates.TemplateResponse(
+        request,
+        "index.html.jinja",
+        {
+            "initial_survey": survey or "lsst",
+            "initial_oid": oid,
+            "initial_classifier": classifier,
+            "initial_identifier": identifier,
+        },
+    )
 
 
 @router.get("/htmx/search_objects/", response_class=HTMLResponse)
-async def search_form(request: Request, survey: str = "lsst") -> HTMLResponse:
+async def search_form(
+    request: Request,
+    survey: str = "lsst",
+    classifier: str | None = None,
+) -> HTMLResponse:
     _validate_survey(survey)
     try:
         tidy = await classifiers_service.get_tidy_classifiers(survey)
@@ -60,7 +110,7 @@ async def search_form(request: Request, survey: str = "lsst") -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "search_form/form.html.jinja",
-        {"survey": survey, "classifiers": tidy},
+        {"survey": survey, "classifiers": tidy, "selected_classifier": classifier},
     )
 
 
@@ -122,21 +172,40 @@ async def list_objects(
             "has_next": False, "next": False,
             "info_message": f"Upstream error: {e}",
         }
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         request,
         "main_table_objects/objects_table.html.jinja",
-        {"objects_list": data, "survey": survey},
+        {"objects_list": data, "survey": survey, "classifier": classifier},
     )
+    # HX-Push-Url updates the browser address bar to a shareable `/?…` form
+    # without reloading; htmx only honors it for requests it made itself.
+    resp.headers["HX-Push-Url"] = _share_url(survey=survey, classifier=classifier)
+    return resp
 
 
 @router.get("/htmx/detail", response_class=HTMLResponse)
-async def detail(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+async def detail(
+    request: Request,
+    oid: str,
+    survey_id: str,
+    classifier: str | None = None,
+    identifier: str | None = None,
+) -> HTMLResponse:
     _validate_survey(survey_id)
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         request,
         "object_detail/container.html.jinja",
-        {"oid": oid, "survey_id": survey_id},
+        {
+            "oid": oid,
+            "survey_id": survey_id,
+            "classifier": classifier,
+            "identifier": identifier,
+        },
     )
+    resp.headers["HX-Push-Url"] = _share_url(
+        survey=survey_id, oid=oid, classifier=classifier, identifier=identifier
+    )
+    return resp
 
 
 @router.get("/htmx/lightcurve", response_class=HTMLResponse)

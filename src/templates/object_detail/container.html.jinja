@@ -6,7 +6,13 @@
     Row 1: basic-information (1 col) | light curve (2 cols) | position residuals (1 col).
     Row 2: radar plot (1 col) | stamps (2 cols) | Aladin (1 col).
 #}
-<div id="object-detail" class="tw-flex tw-flex-col tw-gap-3">
+<div
+  id="object-detail"
+  class="tw-flex tw-flex-col tw-gap-3"
+  data-oid="{{ oid }}"
+  data-survey-id="{{ survey_id }}"
+  {% if classifier %}data-classifier="{{ classifier }}"{% endif %}
+>
 
   <div class="tw-flex tw-items-center tw-gap-2">
     <button
@@ -19,6 +25,28 @@
       hx-vals='js:{...send_form_Data()}'
     >← Back to results</button>
     <div class="tw-text-xs tw-text-text-muted">{{ survey_id|upper }} · {{ oid }}</div>
+    {# Prev/next arrows walk through the current page of results; when the
+       current OID is at the edge they hop to the previous/next page and pick
+       the appropriate sibling. Keyboard ArrowLeft/ArrowRight mirror them.
+       Hidden by default — object_nav.js reveals them iff nav state exists. #}
+    <div id="object-nav" class="tw-ml-auto tw-hidden tw-items-center tw-gap-2">
+      <button
+        type="button"
+        id="object-nav-prev"
+        class="tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
+        title="Previous object (←)"
+        onclick="navObject('prev')"
+      >←</button>
+      {# Position indicator — "3/20 · page 2" — populated by object_nav.js. #}
+      <span id="object-nav-position" class="tw-text-xs tw-text-text-muted mono"></span>
+      <button
+        type="button"
+        id="object-nav-next"
+        class="tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
+        title="Next object (→)"
+        onclick="navObject('next')"
+      >→</button>
+    </div>
   </div>
 
   <div class="tw-grid tw-grid-cols-4 tw-gap-3">
@@ -68,7 +96,7 @@
     <div
       id="stamps-slot"
       class="tw-col-span-2"
-      hx-get="{{ API_URL }}/htmx/stamps?oid={{ oid }}&survey_id={{ survey_id }}"
+      hx-get="{{ API_URL }}/htmx/stamps?oid={{ oid }}&survey_id={{ survey_id }}{% if identifier %}&identifier={{ identifier|urlencode }}{% endif %}"
       hx-trigger="load"
       hx-swap="innerHTML"
     >
