@@ -6,6 +6,7 @@ fragment so htmx can swap them into the results slot.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -17,11 +18,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from ..services import classifiers as classifiers_service
+from ..services import coord_residuals as coord_residuals_service
 from ..services import lightcurve as lightcurve_service
 from ..services import object_info as object_info_service
 from ..services import object_list as object_list_service
+from ..services import probability as probability_service
 from ..services import stamps as stamps_service
-from ..services.survey_config import known_surveys
+from ..services.survey_config import SC, known_surveys
 
 log = logging.getLogger(__name__)
 
@@ -139,17 +142,48 @@ async def detail(request: Request, oid: str, survey_id: str) -> HTMLResponse:
 @router.get("/htmx/lightcurve", response_class=HTMLResponse)
 async def lightcurve(request: Request, oid: str, survey_id: str) -> HTMLResponse:
     _validate_survey(survey_id)
+    # object_info fetched in parallel to source ra/dec for the Milky-Way
+    # dust lookup (client-side, via the IRSA proxy). Failure is non-fatal —
+    # the light curve still renders, just without automatic E(B-V).
+    lc_task = lightcurve_service.get_lightcurve(survey=survey_id, oid=oid)
+    info_task = object_info_service.get_object_info(survey=survey_id, oid=oid)
+    results = await asyncio.gather(lc_task, info_task, return_exceptions=True)
+    data, info = results
+    if isinstance(data, Exception):
+        log.exception("lightcurve failed", exc_info=data)
+        return HTMLResponse(
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {data}</div>'
+        )
+    ra = info.get("ra") if isinstance(info, dict) else None
+    dec = info.get("dec") if isinstance(info, dict) else None
+    return templates.TemplateResponse(
+        request,
+        "lightcurve/lightcurvePreview.html.jinja",
+        {
+            "lc": data,
+            "oid": oid,
+            "survey_id": survey_id,
+            "ra": ra,
+            "dec": dec,
+            "extinction_r": SC(survey_id).extinction_r,
+        },
+    )
+
+
+@router.get("/htmx/coord_residuals", response_class=HTMLResponse)
+async def coord_residuals(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    _validate_survey(survey_id)
     try:
-        data = await lightcurve_service.get_lightcurve(survey=survey_id, oid=oid)
+        ctx = await coord_residuals_service.get_coord_residuals(survey=survey_id, oid=oid)
     except Exception as e:
-        log.exception("lightcurve failed")
+        log.exception("coord_residuals failed")
         return HTMLResponse(
             f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
         )
     return templates.TemplateResponse(
         request,
-        "lightcurve/lightcurvePreview.html.jinja",
-        {"lc": data, "oid": oid, "survey_id": survey_id},
+        "coord_residuals/coordResidualsPreview.html.jinja",
+        {"ctx": ctx, "oid": oid, "survey_id": survey_id},
     )
 
 
@@ -173,6 +207,23 @@ async def stamps(
     return templates.TemplateResponse(
         request,
         "stamps/stampsPreview.html.jinja",
+        {"ctx": ctx, "oid": oid, "survey_id": survey_id},
+    )
+
+
+@router.get("/htmx/probability", response_class=HTMLResponse)
+async def probability(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    _validate_survey(survey_id)
+    try:
+        ctx = await probability_service.get_probability_context(survey=survey_id, oid=oid)
+    except Exception as e:
+        log.exception("probability failed")
+        return HTMLResponse(
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
+        )
+    return templates.TemplateResponse(
+        request,
+        "radar/radarPreview.html.jinja",
         {"ctx": ctx, "oid": oid, "survey_id": survey_id},
     )
 

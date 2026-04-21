@@ -30,6 +30,8 @@ class SurveyConfig:
     # Maps the logical stamp-type ("science", "template", "difference") to the
     # name the survey's stamp API expects.
     stamp_type_names: dict[str, str]
+    # Returns a flat list of probability rows (one per class per classifier).
+    prob_url_template: str  # full URL; uses {oid}
     bands: tuple[str, ...]
     default_classifier: str
     has_forced_phot: bool
@@ -59,6 +61,9 @@ class SurveyConfig:
         return self.stamp_url_template.format(
             oid=oid, identifier=identifier, stamp_type=survey_type
         )
+
+    def prob_url(self, oid: str) -> str:
+        return self.prob_url_template.format(oid=oid)
 
 
 def _ztf_extra_params(params: dict[str, object]) -> dict[str, object]:
@@ -113,6 +118,10 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
             "template": "cutoutTemplate",
             "difference": "cutoutDifference",
         },
+        prob_url_template=(
+            "https://api-lsst.alerce.online/probability_api/probability"
+            "?survey_id=lsst&oid={oid}"
+        ),
         bands=("u", "g", "r", "i", "z", "y"),
         default_classifier="lc_classifier_top",
         has_forced_phot=True,
@@ -140,6 +149,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
             "template": "template",
             "difference": "difference",
         },
+        prob_url_template="https://api.alerce.online/ztf/v1/objects/{oid}/probabilities",
         bands=("g", "r", "i"),
         default_classifier="lc_classifier",
         has_forced_phot=True,

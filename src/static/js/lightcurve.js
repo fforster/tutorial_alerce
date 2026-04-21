@@ -29,24 +29,50 @@
   // Canvas element → Chart instance, so we can destroy before re-initializing.
   const charts = new WeakMap();
 
-  function projectPoint(p, axisMode, sourceMode) {
+  // Projection corrections composed in a fixed order:
+  //   1. Milky-Way extinction per band (A_λ = R_λ · E(B-V)), applied BEFORE
+  //      the distance modulus so absolute values are also dust-free.
+  //      extMag comes in already multiplied by E(B-V); 0 means "don't apply".
+  //   2. Distance modulus (Abs mode with z > 0). null means apparent.
+  // In mag-space both are additive shifts (M = m − A − μ); in flux-space
+  // they compose multiplicatively (10^(0.4·A) then 10^(0.4·μ)).
+  function projectPoint(p, axisMode, sourceMode, distMod, extMag) {
     const flux = sourceMode === "sci" ? p.sci_flux : p.flux;
     const eFlux = sourceMode === "sci" ? p.e_sci_flux : p.e_flux;
     if (flux == null) return null;
+    const A = extMag || 0;
     if (axisMode === "mag") {
       if (flux <= 0) return null;
-      const mag = AB_ZP_NJY - 2.5 * Math.log10(flux);
+      let mag = AB_ZP_NJY - 2.5 * Math.log10(flux);
       const eMag = eFlux != null ? eFlux / flux / LN10_OVER_2P5 : null;
+      if (A !== 0) mag = mag - A;
+      if (distMod != null) mag = mag - distMod;
       return { x: p.mjd, y: mag, e: eMag, identifier: p.identifier, has_stamp: p.has_stamp };
     }
-    return { x: p.mjd, y: flux, e: eFlux, identifier: p.identifier, has_stamp: p.has_stamp };
+    let y = flux;
+    let e = eFlux;
+    if (A !== 0) {
+      const scaleA = Math.pow(10, 0.4 * A);
+      y *= scaleA;
+      if (e != null) e *= scaleA;
+    }
+    if (distMod != null) {
+      const scaleD = Math.pow(10, 0.4 * distMod);
+      y *= scaleD;
+      if (e != null) e *= scaleD;
+    }
+    return { x: p.mjd, y, e, identifier: p.identifier, has_stamp: p.has_stamp };
   }
 
-  function buildDatasets(bands, fpBands, axisMode, sourceMode) {
-    const project = (pts) => pts.map((p) => projectPoint(p, axisMode, sourceMode)).filter(Boolean);
+  function buildDatasets(bands, fpBands, axisMode, sourceMode, distMod, extByBand) {
+    const extFor = (name) => (extByBand || {})[name] || 0;
+    const project = (band) =>
+      band.points
+        .map((p) => projectPoint(p, axisMode, sourceMode, distMod, extFor(band.name)))
+        .filter(Boolean);
     const det = bands.map((b) => ({
       label: b.name,
-      data: project(b.points),
+      data: project(b),
       backgroundColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       showLine: false,
@@ -58,7 +84,7 @@
     // FP rows don't carry a stamp identifier, so clicks on them are no-ops.
     const fp = (fpBands || []).map((b) => ({
       label: `${b.name} (FP)`,
-      data: project(b.points),
+      data: project(b),
       backgroundColor: "transparent",
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderWidth: 1,
@@ -70,19 +96,51 @@
     return [...det, ...fp];
   }
 
+  // Distance modulus only applied when Abs mode is armed AND z is valid AND
+  // the cosmology module is loaded; any missing piece → apparent projection.
+  function computeDistMod(chart) {
+    if (chart.$lcAbs !== "abs") return null;
+    const z = chart.$lcZ;
+    if (!(z > 0)) return null;
+    if (typeof window.cosmology === "undefined") return null;
+    const mu = window.cosmology.distanceModulus(z);
+    return isFinite(mu) ? mu : null;
+  }
+
+  // Per-band A_λ = R_λ · E(B-V) when Der mode is armed with a positive
+  // E(B-V); empty object → no correction. Bands missing from R_λ (e.g.
+  // "unknown") silently contribute 0, matching the survey-config contract.
+  function computeExtByBand(chart) {
+    if (chart.$lcDered !== "dered") return {};
+    const ebv = chart.$lcEbv;
+    if (!(ebv > 0)) return {};
+    const R = chart.$lcExtR || {};
+    const out = {};
+    for (const [band, r] of Object.entries(R)) out[band] = r * ebv;
+    return out;
+  }
+
   function applyModes(chart) {
     const raw = chart.$lcRaw;
     if (!raw) return;
     const axisMode = chart.$lcMode;
     const sourceMode = chart.$lcSource;
-    chart.data.datasets = buildDatasets(raw.bands, raw.fpBands, axisMode, sourceMode);
+    const distMod = computeDistMod(chart);
+    const extByBand = computeExtByBand(chart);
+    const dered = Object.keys(extByBand).length > 0;
+    chart.data.datasets = buildDatasets(
+      raw.bands, raw.fpBands, axisMode, sourceMode, distMod, extByBand,
+    );
     const y = chart.options.scales.y;
     const sciLabel = sourceMode === "sci" ? "science" : "diff";
+    const absPrefix = distMod != null ? "Abs " : "";
+    const deredSuffix = dered ? ", dered" : "";
     if (axisMode === "mag") {
-      y.title.text = `Magnitude (AB, ${sciLabel})`;
+      y.title.text = `${absPrefix}Magnitude (AB, ${sciLabel}${deredSuffix})`;
       y.reverse = true;
     } else {
-      y.title.text = `Flux (nJy, ${sciLabel})`;
+      const at10pc = distMod != null ? " @ 10 pc" : "";
+      y.title.text = `${absPrefix}Flux (nJy${at10pc}, ${sciLabel}${deredSuffix})`;
       y.reverse = false;
     }
     chart.update();
@@ -111,18 +169,32 @@
     const initialAxisMode = "flux";
     const initialSourceMode = "diff";
 
+    // Per-band R_λ map comes from SurveyConfig.extinction_r via the template;
+    // missing attribute falls back to an empty dict so chart still renders.
+    let extR = {};
+    try { extR = JSON.parse(canvas.dataset.extR || "{}"); } catch { /* noop */ }
+
     const chart = new Chart(canvas.getContext("2d"), {
       type: "scatter",
-      data: { datasets: buildDatasets(bands, fpBands, initialAxisMode, initialSourceMode) },
+      data: { datasets: buildDatasets(bands, fpBands, initialAxisMode, initialSourceMode, null, null) },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        // Toggles re-project every point (flux↔mag, app↔abs, obs↔der); the
+        // tween between old and new positions muddles the comparison, so
+        // skip it entirely and let each state snap in.
+        animation: false,
+        animations: { colors: false, numbers: false },
+        transitions: { active: { animation: { duration: 0 } } },
+        // Left-click stays available for stamp sync; drag-zoom requires shift
+        // so it doesn't swallow clicks, and pan uses ctrl to keep the two
+        // interactions distinct. Double-click resets the zoom (wired below).
         onClick: (_evt, elements) => {
           if (!elements.length) return;
           const { datasetIndex, index } = elements[0];
           const p = chart.data.datasets[datasetIndex].data[index];
-          if (p?.has_stamp && p.identifier && window.updateStampsForIdentifier) {
-            window.updateStampsForIdentifier(p.identifier);
+          if (p?.has_stamp && p.identifier && window.setSelectedIdentifier) {
+            window.setSelectedIdentifier(p.identifier);
           }
         },
         onHover: (evt, elements) => {
@@ -162,50 +234,154 @@
               },
             },
           },
+          zoom: {
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: { enabled: true, modifierKey: "shift" },
+              mode: "xy",
+            },
+            pan: { enabled: true, mode: "xy", modifierKey: "ctrl" },
+          },
         },
       },
     });
     chart.$lcRaw = { bands, fpBands };
     chart.$lcMode = initialAxisMode;
     chart.$lcSource = initialSourceMode;
+    chart.$lcAbs = "app";
+    chart.$lcZ = null;
+    chart.$lcDered = "obs";
+    chart.$lcEbv = null;
+    chart.$lcExtR = extR;
+    canvas.addEventListener("dblclick", () => chart.resetZoom && chart.resetZoom());
     charts.set(canvas, chart);
+
+    // Seed redshift from the matching z input if it already has a value
+    // (e.g. the user typed one before we initialized, or an htmx swap).
+    const zInput = document.querySelector(`.lc-redshift-input[data-target="${canvas.id}"]`);
+    if (zInput) syncRedshiftFromInput(chart, zInput, false);
+    const ebvInput = document.querySelector(`.lc-ebv-input[data-target="${canvas.id}"]`);
+    if (ebvInput) syncEbvFromInput(chart, ebvInput, false);
+
+    // Kick off the Milky-Way E(B-V) fetch if we have coords and the input
+    // is still empty (don't clobber a user-entered override). The proxy
+    // caches by (ra,dec) rounded to 0.01° so repeat calls are cheap.
+    const ra = parseFloat(canvas.dataset.ra);
+    const dec = parseFloat(canvas.dataset.dec);
+    if (isFinite(ra) && isFinite(dec) && window.dust && ebvInput && !ebvInput.value) {
+      window.dust.fetchEBV(ra, dec).then((res) => {
+        if (!res || !(res.ebv > 0)) return;
+        if (ebvInput.value) return;  // user typed in while we were fetching
+        ebvInput.value = res.ebv.toFixed(4);
+        ebvInput.title = `SF11=${(res.ebv_sf11 ?? NaN).toFixed(4)} · SFD98=${(res.ebv_sfd98 ?? NaN).toFixed(4)}`;
+        syncEbvFromInput(chart, ebvInput, true);
+      });
+    }
   }
 
-  function paintButtons(toggle, btnClass, activeValue, dataKey) {
-    toggle.querySelectorAll(btnClass).forEach((b) => {
-      const active = b.dataset[dataKey] === activeValue;
-      b.setAttribute("aria-pressed", active ? "true" : "false");
-      b.classList.toggle("tw-bg-bg-secondary", active);
-      b.classList.toggle("tw-text-text-primary", active);
-      b.classList.toggle("tw-bg-bg-card", !active);
-      b.classList.toggle("tw-text-text-muted", !active);
-    });
+  // Cycle buttons carry only the active value in their text + data attribute.
+  // Click advances to the next value in `spec.values`; a guard can block the
+  // advance (e.g. Abs requires z > 0) in which case the button stays put.
+  function setCycleValue(btn, spec, value) {
+    btn.dataset[spec.dataKey] = value;
+    btn.textContent = spec.labels[value];
   }
 
-  function bindToggle(toggle, spec) {
-    if (toggle.$bound) return;
-    toggle.$bound = true;
-    toggle.addEventListener("click", (evt) => {
-      const btn = evt.target.closest(spec.btnSelector);
-      if (!btn) return;
-      const value = btn.dataset[spec.dataKey];
-      const canvas = document.getElementById(toggle.dataset.target);
+  function bindCycleButton(btn, spec) {
+    if (btn.$bound) return;
+    btn.$bound = true;
+    setCycleValue(btn, spec, btn.dataset[spec.dataKey]);
+    btn.addEventListener("click", () => {
+      const canvas = document.getElementById(btn.dataset.target);
       const chart = canvas && charts.get(canvas);
-      if (!chart || chart[spec.chartProp] === value) return;
-      chart[spec.chartProp] = value;
+      if (!chart) return;
+      const current = btn.dataset[spec.dataKey];
+      const idx = spec.values.indexOf(current);
+      const next = spec.values[(idx + 1) % spec.values.length];
+      if (spec.guard && !spec.guard(chart, next)) return;
+      chart[spec.chartProp] = next;
+      setCycleValue(btn, spec, next);
       applyModes(chart);
-      paintButtons(toggle, spec.btnSelector, value, spec.dataKey);
     });
+  }
+
+  const TOGGLE_SPECS = {
+    mode:   { btnSelector: ".lc-mode-toggle",   dataKey: "lcMode",   chartProp: "$lcMode",
+              values: ["flux", "mag"], labels: { flux: "Flux", mag: "Mag" } },
+    source: { btnSelector: ".lc-source-toggle", dataKey: "lcSource", chartProp: "$lcSource",
+              values: ["diff", "sci"], labels: { diff: "Diff", sci: "Sci" } },
+    abs:    { btnSelector: ".lc-abs-toggle",    dataKey: "lcAbs",    chartProp: "$lcAbs",
+              values: ["app", "abs"], labels: { app: "App", abs: "Abs" },
+              guard: (chart, v) => v !== "abs" || (chart.$lcZ != null && chart.$lcZ > 0) },
+    dered:  { btnSelector: ".lc-dered-toggle",  dataKey: "lcDered",  chartProp: "$lcDered",
+              values: ["obs", "dered"], labels: { obs: "Obs", dered: "Der" },
+              guard: (chart, v) => v !== "dered" || (chart.$lcEbv != null && chart.$lcEbv > 0) },
+  };
+
+  // Keeps chart state aligned with the z input. If the user clears z while
+  // the chart is in Abs mode, the projection has nothing to scale by — fall
+  // back to App so the plot stays meaningful rather than silently reverting
+  // to apparent values without updating the button or axis label.
+  function syncRedshiftFromInput(chart, input, redraw) {
+    const z = parseFloat(input.value);
+    const valid = isFinite(z) && z > 0;
+    chart.$lcZ = valid ? z : null;
+    if (!valid && chart.$lcAbs === "abs") {
+      chart.$lcAbs = "app";
+      const btn = document.querySelector(`.lc-abs-toggle[data-target="${input.dataset.target}"]`);
+      if (btn) setCycleValue(btn, TOGGLE_SPECS.abs, "app");
+    }
+    if (redraw) applyModes(chart);
+  }
+
+  function bindRedshiftInput(input) {
+    if (input.$bound) return;
+    input.$bound = true;
+    const handler = () => {
+      const canvas = document.getElementById(input.dataset.target);
+      const chart = canvas && charts.get(canvas);
+      if (!chart) return;
+      syncRedshiftFromInput(chart, input, true);
+    };
+    input.addEventListener("input", handler);
+    input.addEventListener("change", handler);
+  }
+
+  // Mirror of syncRedshiftFromInput for E(B-V): parses, caches, and demotes
+  // the chart from Der → Obs if the value goes invalid while dereddening.
+  function syncEbvFromInput(chart, input, redraw) {
+    const ebv = parseFloat(input.value);
+    const valid = isFinite(ebv) && ebv > 0;
+    chart.$lcEbv = valid ? ebv : null;
+    if (!valid && chart.$lcDered === "dered") {
+      chart.$lcDered = "obs";
+      const btn = document.querySelector(`.lc-dered-toggle[data-target="${input.dataset.target}"]`);
+      if (btn) setCycleValue(btn, TOGGLE_SPECS.dered, "obs");
+    }
+    if (redraw) applyModes(chart);
+  }
+
+  function bindEbvInput(input) {
+    if (input.$bound) return;
+    input.$bound = true;
+    const handler = () => {
+      const canvas = document.getElementById(input.dataset.target);
+      const chart = canvas && charts.get(canvas);
+      if (!chart) return;
+      syncEbvFromInput(chart, input, true);
+    };
+    input.addEventListener("input", handler);
+    input.addEventListener("change", handler);
   }
 
   function initToggles(root) {
     const scope = root || document;
-    scope.querySelectorAll(".lc-mode-toggle").forEach((t) =>
-      bindToggle(t, { btnSelector: ".lc-mode-btn", dataKey: "lcMode", chartProp: "$lcMode" })
-    );
-    scope.querySelectorAll(".lc-source-toggle").forEach((t) =>
-      bindToggle(t, { btnSelector: ".lc-source-btn", dataKey: "lcSource", chartProp: "$lcSource" })
-    );
+    for (const spec of Object.values(TOGGLE_SPECS)) {
+      scope.querySelectorAll(spec.btnSelector).forEach((b) => bindCycleButton(b, spec));
+    }
+    scope.querySelectorAll(".lc-redshift-input").forEach(bindRedshiftInput);
+    scope.querySelectorAll(".lc-ebv-input").forEach(bindEbvInput);
   }
 
   function initAll(root) {

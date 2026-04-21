@@ -110,6 +110,10 @@ def test_detail_renders_container(client):
     assert "/htmx/stamps?oid=ZTF21abc&survey_id=ztf" in r.text
     assert 'id="aladin-slot"' in r.text
     assert "/htmx/aladin?oid=ZTF21abc&survey_id=ztf" in r.text
+    assert 'id="radar-slot"' in r.text
+    assert "/htmx/probability?oid=ZTF21abc&survey_id=ztf" in r.text
+    assert 'id="coord-residuals-slot"' in r.text
+    assert "/htmx/coord_residuals?oid=ZTF21abc&survey_id=ztf" in r.text
 
 
 def test_detail_rejects_unknown_survey(client):
@@ -170,9 +174,16 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
             "has_science_flux": True,
         }
 
+    async def fake_info(*, survey, oid):
+        return {"ra": 150.0, "dec": 30.0}
+
     monkeypatch.setattr(
         "src.routes.htmx.lightcurve_service.get_lightcurve",
         fake_lc,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
     )
     r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
@@ -180,21 +191,36 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
     assert "data-lc=" in r.text
     # JSON payload is embedded; spot-check a value.
     assert "60000" in r.text
-    assert "2 detections" in r.text
-    assert "1 FP" in r.text
     assert "forced_phot_bands" in r.text
     # Per-point identifier + has_stamp power the click-to-sync handler in JS.
     assert "has_stamp" in r.text
     assert "identifier" in r.text
-    # Flux/Mag toggle markup is present when there are points to plot.
+    # Flux/Mag cycle-button markup is present when there are points to plot.
+    # Each toggle is a single <button> carrying the initial (active) value;
+    # click advances through the ring client-side.
     assert 'class="lc-mode-toggle' in r.text
     assert 'data-target="lc-canvas-ZTF21abc"' in r.text
     assert 'data-lc-mode="flux"' in r.text
-    assert 'data-lc-mode="mag"' in r.text
-    # Diff/Sci toggle appears when the survey reports science flux.
+    # Diff/Sci cycle button appears when the survey reports science flux.
     assert 'class="lc-source-toggle' in r.text
     assert 'data-lc-source="diff"' in r.text
-    assert 'data-lc-source="sci"' in r.text
+    # Host-galaxy redshift input — populated by clicks on spec-z overlays in
+    # Aladin; `data-target` pairs it with the canvas for the JS listener.
+    assert 'id="lc-redshift-ZTF21abc"' in r.text
+    assert 'class="lc-redshift-input' in r.text
+    # App/Abs cycle button (apparent vs. distance-modulus–corrected).
+    assert 'class="lc-abs-toggle' in r.text
+    assert 'data-lc-abs="app"' in r.text
+    # Obs/Der cycle button + E(B-V) input for Milky-Way extinction correction.
+    assert 'class="lc-dered-toggle' in r.text
+    assert 'data-lc-dered="obs"' in r.text
+    assert 'id="lc-ebv-ZTF21abc"' in r.text
+    # ra/dec propagated to the canvas for the client-side dust lookup; R_λ
+    # per-band map comes from SurveyConfig (ZTF: g, r, i).
+    assert 'data-ra="150.0"' in r.text
+    assert 'data-dec="30.0"' in r.text
+    assert "data-ext-r=" in r.text
+    assert "3.237" in r.text  # R_g for ZTF/LSST
 
 
 def test_lightcurve_empty_shows_message(client, monkeypatch):
@@ -204,9 +230,16 @@ def test_lightcurve_empty_shows_message(client, monkeypatch):
             "n_det": 0, "n_fp": 0, "has_science_flux": True,
         }
 
+    async def fake_info(*, survey, oid):
+        return {"ra": None, "dec": None}
+
     monkeypatch.setattr(
         "src.routes.htmx.lightcurve_service.get_lightcurve",
         fake_lc,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
     )
     r = client.get("/htmx/lightcurve?oid=x&survey_id=lsst")
     assert r.status_code == 200
@@ -231,9 +264,16 @@ def test_lightcurve_hides_sci_toggle_when_survey_lacks_science_flux(client, monk
             "has_science_flux": False,
         }
 
+    async def fake_info(*, survey, oid):
+        return {"ra": 10.0, "dec": -20.0}
+
     monkeypatch.setattr(
         "src.routes.htmx.lightcurve_service.get_lightcurve",
         fake_lc,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
     )
     r = client.get("/htmx/lightcurve?oid=x&survey_id=lsst")
     assert r.status_code == 200
@@ -251,13 +291,56 @@ def test_lightcurve_upstream_error_renders_message(client, monkeypatch):
     async def fake_lc(*, survey, oid):
         raise RuntimeError("network down")
 
+    async def fake_info(*, survey, oid):
+        return {"ra": None, "dec": None}
+
     monkeypatch.setattr(
         "src.routes.htmx.lightcurve_service.get_lightcurve",
         fake_lc,
     )
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
+    )
     r = client.get("/htmx/lightcurve?oid=x&survey_id=ztf")
     assert r.status_code == 200
     assert "Upstream error" in r.text
+
+
+def test_lightcurve_renders_even_when_object_info_fails(client, monkeypatch):
+    """If the ra/dec lookup fails the panel still renders, sans auto E(B-V)."""
+    async def fake_lc(*, survey, oid):
+        return {
+            "survey": survey,
+            "bands": [{"name": "g", "points": [{
+                "mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0,
+                "sci_flux": None, "e_sci_flux": None,
+                "identifier": "1", "has_stamp": False,
+            }]}],
+            "forced_phot_bands": [],
+            "n_det": 1, "n_fp": 0, "has_science_flux": True,
+        }
+
+    async def fake_info(*, survey, oid):
+        raise RuntimeError("object_api down")
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lightcurve",
+        fake_lc,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
+    )
+    r = client.get("/htmx/lightcurve?oid=x&survey_id=lsst")
+    assert r.status_code == 200
+    assert 'id="lc-canvas-x"' in r.text
+    # Without ra/dec the canvas doesn't carry the dust-fetch hints, but the
+    # E(B-V) input and R_λ map are still there so manual override works.
+    assert "data-ra=" not in r.text
+    assert "data-dec=" not in r.text
+    assert "data-ext-r=" in r.text
+    assert 'id="lc-ebv-x"' in r.text
 
 
 def test_detail_container_wires_lightcurve_slot(client):
@@ -409,6 +492,144 @@ def test_aladin_upstream_error(client, monkeypatch):
         fake_info,
     )
     r = client.get("/htmx/aladin?oid=x&survey_id=ztf")
+    assert r.status_code == 200
+    assert "Upstream error" in r.text
+
+
+def test_probability_renders_canvas_and_picker(client, monkeypatch):
+    async def fake_prob(*, survey, oid):
+        return {
+            "groups": [
+                {
+                    "key": "lc_classifier_top v1.0",
+                    "classifier_name": "lc_classifier_top",
+                    "classifier_version": "1.0",
+                    "classes": [
+                        {"class_name": "SN", "probability": 0.8, "is_max": True},
+                        {"class_name": "AGN", "probability": 0.2, "is_max": False},
+                    ],
+                },
+                {
+                    "key": "lc_classifier_transient v2.0",
+                    "classifier_name": "lc_classifier_transient",
+                    "classifier_version": "2.0",
+                    "classes": [
+                        {"class_name": "SN", "probability": 0.5, "is_max": True},
+                    ],
+                },
+            ],
+            "default_key": "lc_classifier_top v1.0",
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.probability_service.get_probability_context",
+        fake_prob,
+    )
+    r = client.get("/htmx/probability?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert 'id="radar-canvas-ZTF21abc"' in r.text
+    assert "data-probs=" in r.text
+    assert "lc_classifier_top v1.0" in r.text
+    assert "lc_classifier_transient v2.0" in r.text
+    # Picker is wired to the canvas for client-side switching.
+    assert 'class="radar-classifier-select' in r.text
+    assert 'data-target="radar-canvas-ZTF21abc"' in r.text
+
+
+def test_probability_empty_shows_message(client, monkeypatch):
+    async def fake_prob(*, survey, oid):
+        return {"groups": [], "default_key": None}
+
+    monkeypatch.setattr(
+        "src.routes.htmx.probability_service.get_probability_context",
+        fake_prob,
+    )
+    r = client.get("/htmx/probability?oid=x&survey_id=lsst")
+    assert r.status_code == 200
+    assert "No probabilities" in r.text
+    assert "radar-canvas" not in r.text
+
+
+def test_probability_rejects_unknown_survey(client):
+    r = client.get("/htmx/probability?oid=x&survey_id=panstarrs")
+    assert r.status_code == 400
+
+
+def test_probability_upstream_error(client, monkeypatch):
+    async def fake_prob(*, survey, oid):
+        raise RuntimeError("probability api down")
+
+    monkeypatch.setattr(
+        "src.routes.htmx.probability_service.get_probability_context",
+        fake_prob,
+    )
+    r = client.get("/htmx/probability?oid=x&survey_id=ztf")
+    assert r.status_code == 200
+    assert "Upstream error" in r.text
+
+
+def test_coord_residuals_renders_canvas_and_colorbar(client, monkeypatch):
+    async def fake_coord(*, survey, oid):
+        return {
+            "points": [
+                {"d_ra": -0.3, "d_dec": 0.1, "mjd": 60000.0, "band": "g",
+                 "identifier": "111", "has_stamp": True},
+                {"d_ra": 0.6, "d_dec": -0.2, "mjd": 60100.0, "band": "r",
+                 "identifier": "222", "has_stamp": True},
+            ],
+            "n_points": 2,
+            "mean_ra": 150.0, "mean_dec": 30.0,
+            "mjd_min": 60000.0, "mjd_max": 60100.0,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.coord_residuals_service.get_coord_residuals",
+        fake_coord,
+    )
+    r = client.get("/htmx/coord_residuals?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert 'id="coord-canvas-ZTF21abc"' in r.text
+    assert "data-coords=" in r.text
+    # 2 pts label appears with the count.
+    assert "2 pts" in r.text
+    # Colorbar gradient + MJD endpoints present.
+    assert "linear-gradient" in r.text
+    assert "MJD 60000.00" in r.text
+    assert "MJD 60100.00" in r.text
+
+
+def test_coord_residuals_empty_shows_message(client, monkeypatch):
+    async def fake_coord(*, survey, oid):
+        return {
+            "points": [], "n_points": 0,
+            "mean_ra": None, "mean_dec": None,
+            "mjd_min": None, "mjd_max": None,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.coord_residuals_service.get_coord_residuals",
+        fake_coord,
+    )
+    r = client.get("/htmx/coord_residuals?oid=x&survey_id=lsst")
+    assert r.status_code == 200
+    assert "Not enough detections" in r.text
+    assert "coord-residuals-canvas" not in r.text
+
+
+def test_coord_residuals_rejects_unknown_survey(client):
+    r = client.get("/htmx/coord_residuals?oid=x&survey_id=panstarrs")
+    assert r.status_code == 400
+
+
+def test_coord_residuals_upstream_error(client, monkeypatch):
+    async def fake_coord(*, survey, oid):
+        raise RuntimeError("lightcurve api down")
+
+    monkeypatch.setattr(
+        "src.routes.htmx.coord_residuals_service.get_coord_residuals",
+        fake_coord,
+    )
+    r = client.get("/htmx/coord_residuals?oid=x&survey_id=ztf")
     assert r.status_code == 200
     assert "Upstream error" in r.text
 

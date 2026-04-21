@@ -1,0 +1,36 @@
+{#
+  Radar-plot panel — rendered by /htmx/probability.
+  ctx has {groups: [{key, classifier_name, classifier_version, classes:[{class_name, probability, is_max}]}], default_key}.
+  We embed every classifier group as JSON on the canvas so the picker can
+  swap between them without another server round trip.
+#}
+<div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
+  <div class="tw-flex tw-items-center tw-justify-between tw-mb-3 tw-gap-3">
+    <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Probabilities</div>
+    {% if ctx.groups %}
+      <select
+        class="radar-classifier-select tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary"
+        data-target="radar-canvas-{{ oid }}"
+      >
+        {% for g in ctx.groups %}
+          <option
+            value="{{ g.key }}"
+            {% if g.key == ctx.default_key %}selected{% endif %}
+          >{{ g.key }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+  </div>
+
+  {% if ctx.groups %}
+    <div class="tw-relative tw-w-full tw-aspect-square">
+      <canvas
+        id="radar-canvas-{{ oid }}"
+        class="radar-canvas"
+        data-probs='{{ ctx|tojson_compact }}'
+      ></canvas>
+    </div>
+  {% else %}
+    <div class="tw-text-xs tw-text-text-muted tw-py-6 tw-text-center">No probabilities.</div>
+  {% endif %}
+</div>

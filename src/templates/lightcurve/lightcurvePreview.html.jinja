@@ -6,13 +6,11 @@
 #}
 <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-2 tw-gap-3">
-    <div class="tw-text-text-secondary tw-text-xs tw-uppercase">Light curve</div>
+    <div
+      class="tw-text-text-secondary tw-text-xs tw-uppercase"
+      title="Zoom: scroll wheel. Box-zoom: shift+drag. Pan: ctrl+drag. Reset: double-click."
+    >Light curve</div>
     <div class="tw-flex tw-items-center tw-gap-3">
-      <div class="tw-text-text-muted tw-text-xs">
-        {{ lc.n_det }} detection{% if lc.n_det != 1 %}s{% endif %}
-        {% if lc.n_fp %}· {{ lc.n_fp }} FP{% endif %}
-        · {{ lc.bands|length }} band{% if lc.bands|length != 1 %}s{% endif %}
-      </div>
       {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
         {#
           Diff/Sci and Flux/Mag toggles are both pure client-side projections:
@@ -20,48 +18,78 @@
           picks which to plot + whether to apply the AB-ZP-31.4 mag transform.
           No server round trip.
         #}
+        {#
+          Cycle-buttons: one button per axis of state, showing only the
+          currently active value. Click cycles to the next option; the
+          button's `data-lc-*` attribute is the source of truth that the
+          JS binder reads on each click.
+        #}
         {% if lc.has_science_flux %}
-          <div
-            class="lc-source-toggle tw-inline-flex tw-rounded tw-border tw-border-border tw-overflow-hidden tw-text-xs"
+          <button
+            type="button"
+            class="lc-source-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
             data-target="lc-canvas-{{ oid }}"
-            title="Difference flux is measured on the subtracted image (source − reference). Science flux is the total flux on the science image, only available when a reference source exists; transients without a host may have no science-flux points."
-          >
-            <button
-              type="button"
-              class="lc-source-btn tw-px-2 tw-py-0.5 tw-bg-bg-secondary tw-text-text-primary"
-              data-lc-source="diff"
-              aria-pressed="true"
-              title="Difference flux: psf flux measured on the difference (science − reference) image."
-            >Diff</button>
-            <button
-              type="button"
-              class="lc-source-btn tw-px-2 tw-py-0.5 tw-bg-bg-card tw-text-text-muted"
-              data-lc-source="sci"
-              aria-pressed="false"
-              title="Science (total) flux on the science image. Derived from mag_corr for ZTF and scienceFlux for LSST; blank for points without an associated reference source (often the case for pure transients)."
-            >Sci</button>
-          </div>
+            data-lc-source="diff"
+            title="Click to toggle Diff ↔ Sci flux. Difference flux is from the subtracted image; science flux is the total on the science image (when a reference source exists)."
+          >Diff</button>
         {% endif %}
-        <div
-          class="lc-mode-toggle tw-inline-flex tw-rounded tw-border tw-border-border tw-overflow-hidden tw-text-xs"
+        <button
+          type="button"
+          class="lc-mode-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
           data-target="lc-canvas-{{ oid }}"
-          title="Switch the Y-axis between linear flux (nJy) and AB magnitude (zero point 31.4, reversed axis so brighter is up)."
+          data-lc-mode="flux"
+          title="Click to toggle linear flux (nJy) ↔ AB magnitude (ZP 31.4, reversed axis)."
+        >Flux</button>
+        <button
+          type="button"
+          class="lc-abs-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+          data-target="lc-canvas-{{ oid }}"
+          data-lc-abs="app"
+          title="Click to toggle Apparent ↔ Absolute (rest-frame @10 pc, via Planck-2018 distance modulus). Requires positive z."
+        >App</button>
+        <label
+          class="tw-inline-flex tw-items-center tw-gap-1 tw-text-xs tw-text-text-muted"
+          title="Host-galaxy spectroscopic redshift. Click a source in the sky view to populate this from a VizieR catalog, or type one in."
         >
-          <button
-            type="button"
-            class="lc-mode-btn tw-px-2 tw-py-0.5 tw-bg-bg-secondary tw-text-text-primary"
-            data-lc-mode="flux"
-            aria-pressed="true"
-            title="Linear flux in nanojansky."
-          >Flux</button>
-          <button
-            type="button"
-            class="lc-mode-btn tw-px-2 tw-py-0.5 tw-bg-bg-card tw-text-text-muted"
-            data-lc-mode="mag"
-            aria-pressed="false"
-            title="AB magnitude (ZP 31.4). Points with flux ≤ 0 are dropped."
-          >Mag</button>
-        </div>
+          z
+          <input
+            id="lc-redshift-{{ oid }}"
+            type="number"
+            step="any"
+            min="0"
+            placeholder="z"
+            data-target="lc-canvas-{{ oid }}"
+            class="lc-redshift-input tw-w-20 tw-px-1.5 tw-py-0.5 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+          />
+        </label>
+        <button
+          type="button"
+          class="lc-dered-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+          data-target="lc-canvas-{{ oid }}"
+          data-lc-dered="obs"
+          title="Click to toggle Observed ↔ Dereddened (Fitzpatrick 1999 Milky-Way extinction, A_λ = R_λ × E(B-V) per band). Requires a positive E(B-V)."
+        >Obs</button>
+        <label
+          class="tw-inline-flex tw-items-center tw-gap-1 tw-text-xs tw-text-text-muted"
+          title="Milky-Way E(B-V) from the IRSA dust proxy (SF11 preferred, SFD98 fallback), cached per RA/Dec rounded to 0.01°. Leave empty for auto, or type in to override."
+        >
+          E(B-V)
+          <input
+            id="lc-ebv-{{ oid }}"
+            type="number"
+            step="any"
+            min="0"
+            placeholder="auto"
+            data-target="lc-canvas-{{ oid }}"
+            class="lc-ebv-input tw-w-20 tw-px-1.5 tw-py-0.5 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+          />
+        </label>
+        <button
+          type="button"
+          class="chart-zoom-reset-btn tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
+          data-target="lc-canvas-{{ oid }}"
+          title="Reset the light-curve zoom (same as double-clicking the chart)."
+        >Reset zoom</button>
       {% endif %}
     </div>
   </div>
@@ -72,6 +100,9 @@
         id="lc-canvas-{{ oid }}"
         class="lightcurve-canvas"
         data-lc='{{ lc|tojson_compact }}'
+        {% if ra is not none %}data-ra="{{ ra }}"{% endif %}
+        {% if dec is not none %}data-dec="{{ dec }}"{% endif %}
+        data-ext-r='{{ extinction_r|tojson_compact }}'
       ></canvas>
     </div>
   {% else %}

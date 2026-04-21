@@ -134,7 +134,11 @@
       await A.init;
 
       const survey = await chooseBestHiPS(ra, dec);
-      if (legendEl) legendEl.textContent = survey.label;
+      if (legendEl) {
+        legendEl.innerHTML = "";
+        legendEl.classList.add("tw-flex", "tw-flex-wrap", "tw-gap-2", "tw-justify-end");
+        addLegendChip(legendEl, survey.label, null);
+      }
 
       // Aladin needs a concrete div id to attach to; inject one.
       const innerId = `aladin-inner-${oid || Math.random().toString(36).slice(2)}`;
@@ -157,12 +161,48 @@
       const cat = A.catalog({ name: "Object", sourceSize: 14, color: "#58a6ff" });
       aladin.addCatalog(cat);
       cat.addSources([A.source(ra, dec, { name: String(oid) })]);
+
+      // Clicks on any catalog source (main object or spec-z overlay) fire
+      // `objectClicked`. When the clicked source carries a `z` datum, copy
+      // it into the per-oid redshift input so other panels can pick it up
+      // from there later (absolute-mag mode, future cosmology math, …).
+      aladin.on("objectClicked", function (obj) {
+        if (!obj || !obj.data) return;
+        const zStr = obj.data.z;
+        if (!zStr || zStr === "?") return;
+        const z = parseFloat(zStr);
+        if (isNaN(z) || z <= 0) return;
+        const input = document.getElementById(`lc-redshift-${oid}`);
+        if (!input) return;
+        input.value = z.toFixed(5);
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+      if (typeof window.loadSpecZOverlays === "function") {
+        window.loadSpecZOverlays(aladin, ra, dec, (info) => {
+          addLegendChip(legendEl, `${info.name} (${info.count})`, info.color);
+        });
+      }
     } catch (e) {
       console.error("Aladin init failed:", e);
       if (loadingEl) {
         loadingEl.textContent = `Aladin unavailable: ${e.message || e}`;
       }
     }
+  }
+
+  function addLegendChip(legendEl, label, color) {
+    if (!legendEl) return;
+    const chip = document.createElement("span");
+    chip.className = "tw-inline-flex tw-items-center tw-gap-1";
+    if (color) {
+      const dot = document.createElement("span");
+      dot.className = "tw-inline-block tw-w-2 tw-h-2 tw-rounded-full";
+      dot.style.background = color;
+      chip.appendChild(dot);
+    }
+    chip.appendChild(document.createTextNode(label));
+    legendEl.appendChild(chip);
   }
 
   function initAll(root) {

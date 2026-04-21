@@ -1,7 +1,10 @@
 {#
   Object detail container — swapped into #results-slot when a row is clicked.
-  Contains a back button, the basic-information panel, and placeholders for
-  later slices (light curve, stamps, Aladin).
+
+  Layout (search sidebar sits to the left of this, outside the container):
+    4-column grid.
+    Row 1: basic-information (1 col) | light curve (2 cols) | position residuals (1 col).
+    Row 2: radar plot (1 col) | stamps (2 cols) | Aladin (1 col).
 #}
 <div id="object-detail" class="tw-flex tw-flex-col tw-gap-3">
 
@@ -18,9 +21,10 @@
     <div class="tw-text-xs tw-text-text-muted">{{ survey_id|upper }} · {{ oid }}</div>
   </div>
 
-  <div class="tw-grid tw-grid-cols-2 tw-gap-3">
+  <div class="tw-grid tw-grid-cols-4 tw-gap-3">
     <div
       id="basic-info-slot"
+      class="tw-col-span-1"
       hx-get="{{ API_URL }}/htmx/object_information?oid={{ oid }}&survey_id={{ survey_id }}"
       hx-trigger="load"
       hx-swap="innerHTML"
@@ -29,6 +33,7 @@
     </div>
     <div
       id="lightcurve-slot"
+      class="tw-col-span-2"
       hx-get="{{ API_URL }}/htmx/lightcurve?oid={{ oid }}&survey_id={{ survey_id }}"
       hx-trigger="load"
       hx-swap="innerHTML"
@@ -37,11 +42,32 @@
         Loading light curve…
       </div>
     </div>
-  </div>
+    <div
+      id="coord-residuals-slot"
+      class="tw-col-span-1"
+      hx-get="{{ API_URL }}/htmx/coord_residuals?oid={{ oid }}&survey_id={{ survey_id }}"
+      hx-trigger="load"
+      hx-swap="innerHTML"
+    >
+      <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
+        Loading position residuals…
+      </div>
+    </div>
 
-  <div class="tw-grid tw-grid-cols-2 tw-gap-3">
+    <div
+      id="radar-slot"
+      class="tw-col-span-1"
+      hx-get="{{ API_URL }}/htmx/probability?oid={{ oid }}&survey_id={{ survey_id }}"
+      hx-trigger="load"
+      hx-swap="innerHTML"
+    >
+      <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
+        Loading probabilities…
+      </div>
+    </div>
     <div
       id="stamps-slot"
+      class="tw-col-span-2"
       hx-get="{{ API_URL }}/htmx/stamps?oid={{ oid }}&survey_id={{ survey_id }}"
       hx-trigger="load"
       hx-swap="innerHTML"
@@ -52,6 +78,7 @@
     </div>
     <div
       id="aladin-slot"
+      class="tw-col-span-1"
       hx-get="{{ API_URL }}/htmx/aladin?oid={{ oid }}&survey_id={{ survey_id }}"
       hx-trigger="load"
       hx-swap="innerHTML"
