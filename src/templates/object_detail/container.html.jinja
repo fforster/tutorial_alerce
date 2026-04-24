@@ -92,7 +92,7 @@
     <div
       id="radar-slot"
       class="tw-col-span-1"
-      hx-get="{{ API_URL }}/htmx/probability?oid={{ oid }}&survey_id={{ survey_id }}"
+      hx-get="{{ API_URL }}/htmx/probability?oid={{ oid }}&survey_id={{ survey_id }}{% if classifier %}&classifier={{ classifier|urlencode }}{% endif %}"
       hx-trigger="load"
       hx-swap="innerHTML"
     >

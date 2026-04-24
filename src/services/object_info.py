@@ -13,7 +13,12 @@ from __future__ import annotations
 from typing import Any
 
 from . import alerce_client
-from .coordinates import dec_to_dms, ra_to_hms
+from .coordinates import (
+    dec_to_dms,
+    equatorial_to_ecliptic,
+    equatorial_to_galactic,
+    ra_to_hms,
+)
 from .other_archives import build_archive_links
 
 
@@ -66,6 +71,17 @@ def shape_object_info(raw: dict[str, Any], *, survey: str) -> dict[str, Any]:
     ra_hms = ra_to_hms(ra) if ra is not None else None
     dec_dms = dec_to_dms(dec) if dec is not None else None
 
+    # Galactic + ecliptic are pure rotations of (ra, dec), so they go or
+    # stay together: None when either input is missing. Computed server-side
+    # once per object — the values are small and deterministic, so pushing
+    # them into the template data attributes beats doing the rotation in
+    # JavaScript on every toggle click.
+    if ra is not None and dec is not None:
+        l_gal, b_gal = equatorial_to_galactic(ra, dec)
+        lambda_ecl, beta_ecl = equatorial_to_ecliptic(ra, dec)
+    else:
+        l_gal = b_gal = lambda_ecl = beta_ecl = None
+
     archives = build_archive_links(survey=survey, oid=oid or "", ra=ra, dec=dec)
 
     return {
@@ -75,6 +91,10 @@ def shape_object_info(raw: dict[str, Any], *, survey: str) -> dict[str, Any]:
         "dec": dec,
         "ra_hms": ra_hms,
         "dec_dms": dec_dms,
+        "l_gal": l_gal,
+        "b_gal": b_gal,
+        "lambda_ecl": lambda_ecl,
+        "beta_ecl": beta_ecl,
         "firstmjd": firstmjd,
         "lastmjd": lastmjd,
         "delta_mjd": delta,

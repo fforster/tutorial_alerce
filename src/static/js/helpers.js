@@ -117,6 +117,16 @@ window.send_classes_data = send_classes_data;
     const url = new URL(window.location.href);
     url.searchParams.delete("oid");
     url.searchParams.delete("identifier");
+    // Deep-links that include a classifier but no class_name (e.g. a shared
+    // detail URL) would otherwise return an unfiltered listing. Fill the gap
+    // with the radar's active top class so the user lands on "objects like
+    // this one" under the same classifier they were looking at.
+    if (!url.searchParams.get("class_name") && window._currentObjectClass) {
+      url.searchParams.set("class_name", window._currentObjectClass);
+      if (!url.searchParams.get("classifier") && window._currentObjectClassifier) {
+        url.searchParams.set("classifier", window._currentObjectClassifier);
+      }
+    }
     const listUrl = `/htmx/list_objects?${url.searchParams.toString()}`;
     if (window.htmx) window.htmx.ajax("GET", listUrl, "#results-slot");
   }

@@ -376,10 +376,17 @@ async def stamps(
 
 
 @router.get("/htmx/probability", response_class=HTMLResponse)
-async def probability(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+async def probability(
+    request: Request,
+    oid: str,
+    survey_id: str,
+    classifier: str | None = None,
+) -> HTMLResponse:
     _validate_survey(survey_id)
     try:
-        ctx = await probability_service.get_probability_context(survey=survey_id, oid=oid)
+        ctx = await probability_service.get_probability_context(
+            survey=survey_id, oid=oid, classifier=classifier
+        )
     except Exception as e:
         log.exception("probability failed")
         return HTMLResponse(

@@ -374,6 +374,59 @@ def test_get_lightcurve_tolerates_features_failure(monkeypatch):
     assert out["n_det"] == 1
 
 
+def test_get_lightcurve_threads_parametric_fits_from_same_features_call(monkeypatch):
+    """One features fetch must populate both the fold-period and the
+    parametric-fits bundle. Any drift would defeat the "always latest version"
+    invariant we enforce via pick_default_version."""
+    import asyncio
+
+    from src.services import alerce_client, lightcurve as lc_mod
+
+    feature_calls = 0
+
+    async def fake_get(url: str):
+        nonlocal feature_calls
+        if "features" in url:
+            feature_calls += 1
+            return [
+                {"name": "Multiband_period", "value": 3.14, "fid": 12, "version": "27.5.6"},
+                # A full SPM fit on band g (fid=1) at the same version.
+                {"name": "SPM_A", "value": 0.5, "fid": 1, "version": "27.5.6"},
+                {"name": "SPM_beta", "value": 0.3, "fid": 1, "version": "27.5.6"},
+                {"name": "SPM_t0", "value": 5.0, "fid": 1, "version": "27.5.6"},
+                {"name": "SPM_gamma", "value": 2.0, "fid": 1, "version": "27.5.6"},
+                {"name": "SPM_tau_rise", "value": 1.0, "fid": 1, "version": "27.5.6"},
+                {"name": "SPM_tau_fall", "value": 10.0, "fid": 1, "version": "27.5.6"},
+            ]
+        if "v2" in url:
+            return {"detections": [], "forced_photometry": []}
+        return {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
+
+    monkeypatch.setattr(alerce_client, "_get", fake_get)
+    out = asyncio.run(lc_mod.get_lightcurve(survey="ztf", oid="ZTF20abcxyz"))
+    # Single features call served both extractors.
+    assert feature_calls == 1
+    assert out["multiband_period"] == 3.14
+    assert out["parametric_fits"]["spm"]["g"]["A"] == 0.5
+
+
+def test_get_lightcurve_parametric_fits_empty_when_features_missing(monkeypatch):
+    """No features endpoint (LSST) → parametric_fits defaults to {} so the
+    overlay select isn't rendered."""
+    import asyncio
+
+    from src.services import alerce_client, lightcurve as lc_mod
+
+    async def fake_get(url: str):
+        if "forced-photometry" in url:
+            return []
+        return {"detections": [_lsst_det(60000.0, 1, 1000.0)]}
+
+    monkeypatch.setattr(alerce_client, "_get", fake_get)
+    out = asyncio.run(lc_mod.get_lightcurve(survey="lsst", oid="lsst-oid-1"))
+    assert out["parametric_fits"] == {}
+
+
 def test_shape_lightcurve_picks_up_merged_e_sci_flux_end_to_end():
     """Full flow: bad v1 sigmapsf_corr + good v2 e_mag_corr → e_sci_flux
     makes it through the pipeline so the client-side error-bar plugin has

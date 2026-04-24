@@ -19,7 +19,7 @@ import logging
 from typing import Any
 
 from . import alerce_client
-from .features import pick_default_version
+from .features import extract_parametric_fits, pick_default_version
 from .normalize import normalize_dets
 from .survey_config import SC
 
@@ -70,6 +70,7 @@ def shape_lightcurve(
     survey: str,
     fp_raw: list[dict[str, Any]] | None = None,
     multiband_period: float | None = None,
+    parametric_fits: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg = SC(survey)
     det_bands = _bucket_by_band(normalize_dets(raw.get("detections") or [], survey), cfg)
@@ -89,6 +90,11 @@ def shape_lightcurve(
         # detections by this period. None ⇒ button hidden (LSST or ZTF object
         # without a period-finding score yet).
         "multiband_period": multiband_period,
+        # Parametric-fit params (SPM / FLEET / TDE tail) from the same feature
+        # version the Fold button came from. Empty dict ⇒ no overlay picker is
+        # rendered; per-overlay dict keyed by band lets the client hide
+        # options that have no data.
+        "parametric_fits": parametric_fits or {},
     }
 
 
@@ -209,31 +215,39 @@ def _extract_multiband_period(features: Any) -> float | None:
     return values.get(chosen)
 
 
-async def _fetch_multiband_period(url: str | None) -> float | None:
-    """Best-effort fetch of the multiband period for the Fold button.
+async def _fetch_features_bundle(
+    url: str | None, *, survey: str
+) -> tuple[float | None, dict[str, Any]]:
+    """One features fetch, two outputs: the fold-period and the parametric
+    fits overlay bundle. Both derive from the same "latest version" selected
+    by `pick_default_version`, so they can't drift apart.
 
     Mirrors `_fetch_fp`'s error discipline: the light-curve panel must still
-    render if the features endpoint is 404/down/slow. None just means "hide
-    the Fold button" — not a fatal condition.
+    render if the features endpoint is 404/down/slow. A failed fetch just
+    means the Fold button and overlay picker stay hidden — not fatal.
     """
     if url is None:
-        return None
+        return None, {}
     try:
-        return _extract_multiband_period(await alerce_client._get(url))
+        raw = await alerce_client._get(url)
     except Exception as e:
         log.warning("features fetch failed (%s): %s", url, e)
-        return None
+        return None, {}
+    period = _extract_multiband_period(raw)
+    fits = extract_parametric_fits(raw, survey=survey)
+    return period, fits
 
 
 async def get_lightcurve(*, survey: str, oid: str) -> dict[str, Any]:
     cfg = SC(survey)
     fp_url = cfg.fp_url(oid) if cfg.has_forced_phot else None
     features_url = cfg.features_url(oid)
-    raw, fp_resp, period = await asyncio.gather(
+    raw, fp_resp, bundle = await asyncio.gather(
         alerce_client._get(cfg.lightcurve_url(oid)),
         _fetch_fp(fp_url),
-        _fetch_multiband_period(features_url),
+        _fetch_features_bundle(features_url, survey=survey),
     )
+    period, fits = bundle
     if not isinstance(raw, dict):
         raise ValueError(f"Unexpected lightcurve response shape: {type(raw).__name__}")
     # ZTF only: pull mag_corr/e_mag_corr from v2 into v1 so sci-mode error
@@ -242,5 +256,9 @@ async def get_lightcurve(*, survey: str, oid: str) -> dict[str, Any]:
         raw["detections"] = _merge_ztf_v2_corr(raw["detections"], fp_resp)
     fp_raw = _extract_fp(fp_resp, survey)
     return shape_lightcurve(
-        raw, survey=survey, fp_raw=fp_raw, multiband_period=period,
+        raw,
+        survey=survey,
+        fp_raw=fp_raw,
+        multiband_period=period,
+        parametric_fits=fits,
     )

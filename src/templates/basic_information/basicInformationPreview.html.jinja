@@ -9,6 +9,7 @@
       <div class="tw-font-semibold tw-mb-1">What's shown</div>
       <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
         <li><strong class="tw-text-text-primary">RA / Dec</strong> — mean position in decimal degrees and HMS/DMS</li>
+        <li><strong class="tw-text-text-primary">Eq ↔ Gal ↔ Ecl</strong> — cycle the coordinate row between Equatorial (RA/Dec), Galactic (l, b), and J2000 Ecliptic (λ, β); HMS/Deg applies only to Equatorial</li>
         <li><strong class="tw-text-text-primary">First / Last MJD</strong> — time span of detections (Δ MJD is the extent)</li>
         <li><strong class="tw-text-text-primary">N det / N non-det</strong> — detection and non-detection counts</li>
         <li><strong class="tw-text-text-primary">N forced</strong> — LSST forced-photometry count (when available)</li>
@@ -43,11 +44,13 @@
       on the dd so the value can span into the now-empty controls column.
     #}
     <dl class="tw-grid tw-grid-cols-[auto_auto_auto] tw-gap-x-2 tw-gap-y-1 tw-text-xs tw-items-center">
-      <dt class="tw-text-text-secondary">RA</dt>
+      <dt class="tw-text-text-secondary coord-label" data-axis="ra">RA</dt>
       <dd class="mono coord-value"
           data-axis="ra"
           data-deg="{% if info.ra is not none %}{{ '%.5f'|format(info.ra) }}{% endif %}"
-          data-sex="{{ info.ra_hms or '' }}">
+          data-sex="{{ info.ra_hms or '' }}"
+          data-gal="{% if info.l_gal is not none %}{{ '%.5f'|format(info.l_gal) }}{% endif %}"
+          data-ecl="{% if info.lambda_ecl is not none %}{{ '%.5f'|format(info.lambda_ecl) }}{% endif %}">
         {% if info.ra is not none %}{{ "%.5f"|format(info.ra) }}{% else %}-{% endif %}
       </dd>
       {% if info.ra is not none and info.dec is not none %}
@@ -55,18 +58,20 @@
         type="button"
         class="coord-format-toggle tw-justify-self-start tw-px-1 tw-text-[10px] tw-leading-none tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
         data-mode="deg"
-        title="Toggle RA/Dec between decimal degrees and sexagesimal (HH:MM:SS ±DD:MM:SS)."
+        title="Toggle RA/Dec between decimal degrees and sexagesimal (HH:MM:SS ±DD:MM:SS). Equatorial only."
         aria-pressed="false"
       >HMS</button>
       {% else %}
       <span></span>
       {% endif %}
 
-      <dt class="tw-text-text-secondary">Dec</dt>
+      <dt class="tw-text-text-secondary coord-label" data-axis="dec">Dec</dt>
       <dd class="mono coord-value"
           data-axis="dec"
           data-deg="{% if info.dec is not none %}{{ '%.5f'|format(info.dec) }}{% endif %}"
-          data-sex="{{ info.dec_dms or '' }}">
+          data-sex="{{ info.dec_dms or '' }}"
+          data-gal="{% if info.b_gal is not none %}{{ '%.5f'|format(info.b_gal) }}{% endif %}"
+          data-ecl="{% if info.beta_ecl is not none %}{{ '%.5f'|format(info.beta_ecl) }}{% endif %}">
         {% if info.dec is not none %}{{ "%.5f"|format(info.dec) }}{% else %}-{% endif %}
       </dd>
       {% if info.ra is not none and info.dec is not none %}
@@ -125,14 +130,24 @@
   </div>
 
   {#
-    Bottom action row: Show features + Other archives dropdown. Kept
-    together at the bottom so the header (OID + help button) stays clean.
-    Rendered if either action is available — Show features is gated on
-    `has_features` (LSST doesn't publish features yet); Other archives
-    is gated on `info.archives` being non-empty.
+    Bottom action row: coord-system cycler + Show features + Other archives.
+    Kept together at the bottom so the header (OID + help button) stays
+    clean. Rendered if any of the three controls is relevant: ra/dec for the
+    coord-system cycler, `has_features` for Show features (LSST doesn't
+    publish features yet), and non-empty `info.archives` for the dropdown.
   #}
-  {% if has_features or info.archives %}
-    <div class="tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-flex tw-items-center tw-gap-2">
+  {% set has_coords = info.ra is not none and info.dec is not none %}
+  {% if has_coords or has_features or info.archives %}
+    <div class="tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-flex tw-items-center tw-gap-2 tw-flex-wrap">
+      {% if has_coords %}
+      <button
+        type="button"
+        class="coord-system-toggle tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+        data-system="eq"
+        title="Cycle the coordinate row between Equatorial (RA/Dec), Galactic (l, b), and J2000 Ecliptic (λ, β)."
+        aria-label="Cycle coordinate system"
+      >Eq</button>
+      {% endif %}
       {% if has_features %}
       {#
         hx-indicator="#features-loading" reveals the spinner next to the
@@ -198,10 +213,25 @@
   const root = document.getElementById("basic-info");
   if (!root) return;
   const toggle = root.querySelector(".coord-format-toggle");
+  const systemToggle = root.querySelector(".coord-system-toggle");
   const copyBtn = root.querySelector(".coord-copy-btn");
   const msg = root.querySelector(".coord-copy-msg");
   const values = root.querySelectorAll(".coord-value");
+  const labels = root.querySelectorAll(".coord-label");
   if (!values.length) return;
+
+  // Labels per system + axis. The label column swaps RA/Dec ↔ l/b ↔ λ/β so
+  // the row stays self-documenting when the system changes.
+  const SYSTEM_LABELS = {
+    eq:  { ra: "RA",  dec: "Dec", btn: "Eq"  },
+    gal: { ra: "l",   dec: "b",   btn: "Gal" },
+    ecl: { ra: "λ",   dec: "β",   btn: "Ecl" },
+  };
+  const SYSTEM_CYCLE = ["eq", "gal", "ecl"];
+
+  function currentSystem() {
+    return systemToggle ? systemToggle.dataset.system : "eq";
+  }
 
   function currentFormat() {
     // Default "deg" — if the toggle button isn't rendered (only one coord
@@ -210,22 +240,46 @@
   }
 
   function apply() {
-    const mode = currentFormat();
+    const system = currentSystem();
+    const format = currentFormat();
     values.forEach((cell) => {
-      const next = mode === "sex" ? cell.dataset.sex : cell.dataset.deg;
+      let next;
+      if (system === "gal") next = cell.dataset.gal;
+      else if (system === "ecl") next = cell.dataset.ecl;
+      else next = format === "sex" ? cell.dataset.sex : cell.dataset.deg;
       // Blank data-sex (e.g. dec_dms was None) → fall back to the degrees
-      // form rather than showing an empty cell.
+      // form rather than showing an empty cell. Same guard for gal/ecl.
       cell.textContent = next || cell.dataset.deg || "-";
     });
+    labels.forEach((el) => {
+      const axis = el.dataset.axis;
+      el.textContent = SYSTEM_LABELS[system][axis] || el.textContent;
+    });
     if (toggle) {
-      toggle.textContent = mode === "deg" ? "HMS" : "Deg";
-      toggle.setAttribute("aria-pressed", mode === "sex" ? "true" : "false");
+      // Sexagesimal doesn't apply to galactic / ecliptic — make the button
+      // unclickable + invisible so users aren't tempted to click a no-op.
+      // `visibility: hidden` (not `display: none`) keeps the grid cell so
+      // the <dt>/<dd> on the Dec row don't bubble up into the empty slot,
+      // which would shuffle "l / 57.79 / b / -42.76" onto two lines.
+      const hide = system !== "eq";
+      toggle.style.visibility = hide ? "hidden" : "";
+      toggle.disabled = hide;
+      toggle.textContent = format === "deg" ? "HMS" : "Deg";
+      toggle.setAttribute("aria-pressed", format === "sex" ? "true" : "false");
     }
+    if (systemToggle) systemToggle.textContent = SYSTEM_LABELS[system].btn;
   }
 
   if (toggle) {
     toggle.addEventListener("click", () => {
       toggle.dataset.mode = currentFormat() === "deg" ? "sex" : "deg";
+      apply();
+    });
+  }
+  if (systemToggle) {
+    systemToggle.addEventListener("click", () => {
+      const idx = SYSTEM_CYCLE.indexOf(currentSystem());
+      systemToggle.dataset.system = SYSTEM_CYCLE[(idx + 1) % SYSTEM_CYCLE.length];
       apply();
     });
   }

@@ -25,6 +25,7 @@
         <li><strong class="tw-text-text-primary">App ↔ Abs</strong> — apparent ↔ absolute (rest-frame @ 10 pc; requires z &gt; 0; Planck-2018 distance modulus)</li>
         <li><strong class="tw-text-text-primary">Obs ↔ Der</strong> — observed ↔ dereddened (Fitzpatrick 1999, A<sub>λ</sub> = R<sub>λ</sub> × E(B-V) per band; requires E(B-V) &gt; 0)</li>
         <li><strong class="tw-text-text-primary">ZTF DR</strong> — archival ZTF science photometry at this sky position (cone 1.5″); Sci mode only</li>
+        <li><strong class="tw-text-text-primary">Overlay</strong> — parametric model fit from the latest feature-extractor version (SPM, FLEET, or TDE tail), when available</li>
       </ul>
     {% endcall %}
     <div class="tw-flex tw-items-center tw-gap-3">
@@ -155,6 +156,31 @@
             title="Click to fold the light curve at the multiband period ({{ '%.6f'|format(lc.multiband_period) }} d) from the feature table. Two cycles are shown side-by-side."
           >Fold</button>
         {% endif %}
+        {#
+          Parametric-fit overlay picker: only rendered when the features
+          endpoint carried at least one of SPM / FLEET / TDE tail for this
+          object. Options for overlays without any band data are disabled so
+          the user can see they're defined but empty here.
+        #}
+        {% if lc.parametric_fits %}
+          <label
+            class="tw-inline-flex tw-items-center tw-gap-1 tw-text-xs tw-text-text-muted"
+            title="Overlay a parametric model fit (from the latest feature-extractor version) on top of the light curve. SPM is the Sánchez-Sáez+2021 stochastic-parametric model; FLEET and TDE-tail are the ALeRCE transient-tail models."
+          >
+            Overlay
+            <select
+              id="lc-overlay-{{ oid }}"
+              class="lc-overlay-select tw-px-1.5 tw-py-0.5 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary"
+              data-target="lc-canvas-{{ oid }}"
+              data-lc-overlay="none"
+            >
+              <option value="none">none</option>
+              <option value="spm"{% if not lc.parametric_fits.spm %} disabled{% endif %}>SPM</option>
+              <option value="fleet"{% if not lc.parametric_fits.fleet %} disabled{% endif %}>FLEET</option>
+              <option value="tde"{% if not lc.parametric_fits.tde %} disabled{% endif %}>TDE tail</option>
+            </select>
+          </label>
+        {% endif %}
         <button
           type="button"
           class="chart-zoom-reset-btn tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
@@ -164,6 +190,15 @@
       {% endif %}
     </div>
   </div>
+
+  {% if lc.parametric_fits %}
+    {# Filled by lightcurve.js when the overlay select changes; hidden when "none". #}
+    <div
+      id="lc-overlay-info-{{ oid }}"
+      class="lc-overlay-info tw-hidden tw-font-mono tw-text-[10px] tw-text-text-secondary tw-px-1 tw-pb-1 tw-leading-snug"
+      data-target="lc-canvas-{{ oid }}"
+    ></div>
+  {% endif %}
 
   {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
     <div class="tw-relative tw-flex-1 tw-min-h-[15.84rem]">

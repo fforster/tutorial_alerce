@@ -80,3 +80,24 @@ def test_missing_ra_dec_returns_none():
     assert info["ra"] is None
     assert info["ra_hms"] is None
     assert info["dec_dms"] is None
+    # Galactic / ecliptic are pure rotations — no ra/dec → no output.
+    assert info["l_gal"] is None
+    assert info["b_gal"] is None
+    assert info["lambda_ecl"] is None
+    assert info["beta_ecl"] is None
+
+
+def test_galactic_ecliptic_fields_emitted_when_ra_dec_present():
+    """Spot-check: Galactic Center RA/Dec should round-trip to (ℓ ≈ 0, b ≈ 0).
+    Templates read these fields to prefill data-gal / data-ecl attributes,
+    so shape_object_info is the natural place to compute them."""
+    raw = {"oid": "x", "meanra": 266.40499, "meandec": -28.93617}
+    info = shape_object_info(raw, survey="ztf")
+    # Tolerances match the unit-test margin in test_coordinates.
+    dl = min(abs(info["l_gal"]), abs(info["l_gal"] - 360.0))
+    assert dl < 0.01
+    assert abs(info["b_gal"]) < 0.01
+    # Ecliptic values are finite and in range; numeric correctness is the
+    # job of test_coordinates.
+    assert 0.0 <= info["lambda_ecl"] < 360.0
+    assert -90.0 <= info["beta_ecl"] <= 90.0

@@ -368,6 +368,8 @@ def test_object_information_renders_basic_fields(client, monkeypatch):
             "oid": oid, "survey": survey,
             "ra": 180.0, "dec": -30.0,
             "ra_hms": "12:00:00.000", "dec_dms": "-30:00:00.00",
+            "l_gal": 298.88, "b_gal": 31.98,
+            "lambda_ecl": 201.76, "beta_ecl": -21.88,
             "firstmjd": 60000.0, "lastmjd": 60100.0, "delta_mjd": 100.0,
             "n_det": 12, "n_non_det": 38, "n_forced": None,
             "corrected": True, "stellar": False,
@@ -387,9 +389,16 @@ def test_object_information_renders_basic_fields(client, monkeypatch):
     assert "-30:00:00.00" in r.text
     assert 'data-sex="12:00:00.000"' in r.text
     assert 'data-sex="-30:00:00.00"' in r.text
-    # Coord toolbar: format toggle + copy button both present when ra/dec exist.
+    # Coord toolbar: format toggle + system toggle + copy button all present
+    # when ra/dec exist. The system toggle cycles Eq/Gal/Ecl and pre-fills the
+    # value cells with the rotated coords so JS never has to do the maths.
     assert "coord-format-toggle" in r.text
+    assert "coord-system-toggle" in r.text
     assert "coord-copy-btn" in r.text
+    assert 'data-gal="298.88000"' in r.text
+    assert 'data-gal="31.98000"' in r.text
+    assert 'data-ecl="201.76000"' in r.text
+    assert 'data-ecl="-21.88000"' in r.text
     assert "60000.000" in r.text
     assert "ALeRCE Explorer" in r.text
     # ZTF has a features endpoint, so the "Show features" button should render.
@@ -403,6 +412,8 @@ def test_object_information_hides_features_button_for_lsst(client, monkeypatch):
         return {
             "oid": oid, "survey": survey, "ra": 1.0, "dec": 2.0,
             "ra_hms": "00:04:00.000", "dec_dms": "+02:00:00.00",
+            "l_gal": 109.8, "b_gal": -60.0,
+            "lambda_ecl": 1.8, "beta_ecl": 1.5,
             "firstmjd": 60000.0, "lastmjd": 60001.0, "delta_mjd": 1.0,
             "n_det": 1, "n_non_det": 0, "n_forced": 1,
             "corrected": None, "stellar": None, "archives": [],
@@ -687,7 +698,9 @@ def test_detail_container_wires_lightcurve_slot(client):
     assert 'id="lightcurve-slot"' in r.text
 
 
-def _stub_lc_and_info(monkeypatch, *, has_science_flux=True, ra=150.0, dec=30.0):
+def _stub_lc_and_info(
+    monkeypatch, *, has_science_flux=True, ra=150.0, dec=30.0, parametric_fits=None,
+):
     async def fake_lc(*, survey, oid):
         return {
             "survey": survey,
@@ -698,6 +711,7 @@ def _stub_lc_and_info(monkeypatch, *, has_science_flux=True, ra=150.0, dec=30.0)
             }]}],
             "forced_phot_bands": [],
             "n_det": 1, "n_fp": 0, "has_science_flux": has_science_flux,
+            "parametric_fits": parametric_fits or {},
         }
 
     async def fake_info(*, survey, oid):
@@ -741,6 +755,45 @@ def test_lightcurve_without_coords_hides_dr_button(client, monkeypatch):
     r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
     assert "lc-dr-toggle" not in r.text
+
+
+def test_lightcurve_renders_overlay_select_when_fits_present(client, monkeypatch):
+    """When the features endpoint carried SPM / FLEET / TDE params, the
+    overlay picker appears with options that match what the bundle supplied;
+    options without data stay in the select but are disabled."""
+    _stub_lc_and_info(
+        monkeypatch,
+        parametric_fits={
+            "spm": {"g": {"A": 0.5, "beta": 0.3, "t0": 5.0, "gamma": 2.0,
+                          "tau_rise": 1.0, "tau_fall": 10.0}},
+            # FLEET intentionally omitted for this object.
+        },
+    )
+    r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    # Select is rendered and keyed off the same canvas id as the other
+    # toggles, so the JS binder can pair them.
+    assert 'class="lc-overlay-select' in r.text
+    assert 'data-target="lc-canvas-ZTF21abc"' in r.text
+    assert 'id="lc-overlay-ZTF21abc"' in r.text
+    # SPM option active; FLEET + TDE present but disabled (so the user can
+    # see they exist as features but have no data on this object).
+    assert '<option value="spm">SPM</option>' in r.text
+    assert 'value="fleet" disabled' in r.text
+    assert 'value="tde" disabled' in r.text
+    # Info strip slot is rendered (filled by JS when an overlay is selected).
+    assert 'id="lc-overlay-info-ZTF21abc"' in r.text
+
+
+def test_lightcurve_hides_overlay_when_no_parametric_fits(client, monkeypatch):
+    """LSST (no features endpoint) and unfitted ZTF objects return an empty
+    parametric_fits dict; the dropdown must not render at all rather than
+    showing an all-disabled placeholder."""
+    _stub_lc_and_info(monkeypatch, parametric_fits={})
+    r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "lc-overlay-select" not in r.text
+    assert "lc-overlay-info-ZTF21abc" not in r.text
 
 
 def test_api_ztf_dr_proxies_service(client, monkeypatch):
@@ -939,7 +992,7 @@ def test_aladin_upstream_error(client, monkeypatch):
 
 
 def test_probability_renders_canvas_and_picker(client, monkeypatch):
-    async def fake_prob(*, survey, oid):
+    async def fake_prob(*, survey, oid, classifier=None):
         return {
             "groups": [
                 {
@@ -979,7 +1032,7 @@ def test_probability_renders_canvas_and_picker(client, monkeypatch):
 
 
 def test_probability_empty_shows_message(client, monkeypatch):
-    async def fake_prob(*, survey, oid):
+    async def fake_prob(*, survey, oid, classifier=None):
         return {"groups": [], "default_key": None}
 
     monkeypatch.setattr(
@@ -998,7 +1051,7 @@ def test_probability_rejects_unknown_survey(client):
 
 
 def test_probability_upstream_error(client, monkeypatch):
-    async def fake_prob(*, survey, oid):
+    async def fake_prob(*, survey, oid, classifier=None):
         raise RuntimeError("probability api down")
 
     monkeypatch.setattr(

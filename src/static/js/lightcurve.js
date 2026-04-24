@@ -48,6 +48,7 @@
   const LC_DEFAULTS = {
     mode: "flux", source: "diff", abs: "app", dered: "obs", fold: "off",
     z: null, ebv: null, drShown: false, drAlpha: 0.10,
+    overlay: "none",
   };
 
   function readLcStateFromUrl() {
@@ -66,6 +67,7 @@
       ebv:   num("lc_ebv"),
       drShown: p.get("lc_dr") === "on",
       drAlpha: num("lc_dr_alpha") ?? LC_DEFAULTS.drAlpha,
+      overlay: p.get("lc_overlay") || LC_DEFAULTS.overlay,
     };
   }
 
@@ -84,7 +86,8 @@
       state.fold === LC_DEFAULTS.fold &&
       state.z == null && state.ebv == null &&
       !state.drShown &&
-      Math.abs(state.drAlpha - LC_DEFAULTS.drAlpha) < 1e-6;
+      Math.abs(state.drAlpha - LC_DEFAULTS.drAlpha) < 1e-6 &&
+      state.overlay === LC_DEFAULTS.overlay;
     if (!isDefault) window._lcState = state;
   })();
 
@@ -105,6 +108,7 @@
       ebv: chart.$lcEbv,
       drShown: chart.$lcDrShown,
       drAlpha: chart.$lcDrAlpha,
+      overlay: chart.$lcOverlay || "none",
     };
     window._lcState = state;
     const url = new URL(window.location.href);
@@ -124,6 +128,7 @@
     // round-trips to "absent" instead of "0.1".
     const alphaIsDefault = Math.abs((state.drAlpha ?? LC_DEFAULTS.drAlpha) - LC_DEFAULTS.drAlpha) < 1e-6;
     setOrDel("lc_dr_alpha", alphaIsDefault ? null : state.drAlpha, null);
+    setOrDel("lc_overlay", state.overlay, LC_DEFAULTS.overlay);
     // replaceState (not pushState) so the back button still walks results →
     // detail and isn't polluted with an entry per toggle click.
     window.history.replaceState(window.history.state, "", url.toString());
@@ -264,6 +269,259 @@
     return out;
   }
 
+  // ── Parametric-fit overlays ───────────────────────────────────────────────
+  //
+  // Three model shapes live here, ported from ../Feature_explorer — the same
+  // flux/mag projection pipeline runs on the model as on detections, so an
+  // active Abs/Der/Fold toggle re-projects the overlay too. Band params and
+  // the "latest version" selection come pre-picked from the server, so the
+  // client just evaluates the closed-form model on a grid and hands it to
+  // Chart.js as a zero-point line dataset.
+  //
+  // Flux-unit note: the reference uses µJy (AB ZP 23.9); we use nJy (ZP 31.4).
+  //   - SPM_A is stored in mJy; ×1e6 → nJy (the reference used ×1e3 for µJy).
+  //   - FLEET / TDE return magnitudes directly; 10^((31.4-mag)/2.5) → nJy.
+
+  // Per-band line style: each overlay gets a distinct dash pattern so three
+  // overlays on the same chart would still read as distinct curves.
+  const OVERLAY_DASH = { spm: [6, 4], fleet: [2, 3], tde: [5, 2, 1, 2] };
+
+  // Convert a model magnitude into whatever the axis expects, applying the
+  // same distMod + extinction corrections `projectPoint` applies to detections.
+  // Returns null when the projection would need log of a non-positive number.
+  function projectModel(mag, axisMode, distMod, extMag) {
+    if (!isFinite(mag)) return null;
+    const A = extMag || 0;
+    const mu = distMod || 0;
+    if (axisMode === "mag") return mag - A - mu;
+    // Flux path: mag → flux (nJy) and then apply the A + μ scalings.
+    const flux = Math.pow(10, (AB_ZP_NJY - mag) / 2.5);
+    const scale = Math.pow(10, 0.4 * (A + mu));
+    return flux * scale;
+  }
+
+  // Sánchez-Sáez+2021 Eq. A5 — exponential rise × plateau ratio β, joining to
+  // an exponential decay through a sigmoid at t1 = t0 + γ.
+  function spmFlux_mJy(t, A, beta, t0, gamma, tau_rise, tau_fall) {
+    const clamp = (x) => Math.max(-500, Math.min(500, x));
+    const sigmoid = (x) => 1 / (1 + Math.exp(-clamp(x)));
+    const t1 = t0 + gamma;
+    const denom = 1 + Math.exp(-clamp((t - t0) / tau_rise));
+    const betaExp = Math.pow(Math.max(beta, 1e-10), (t - t0) / gamma);
+    const rise = (A * (1 - betaExp)) / denom;
+    const fall = (A * (1 - beta) * Math.exp(-Math.max(0, t - t1) / tau_fall)) / denom;
+    const s = sigmoid((t - t1) / 3);
+    return rise * (1 - s) + fall * s;
+  }
+
+  // Global MJD envelope (from all detection bands). SPM + TDE tail evaluate
+  // on the full range; FLEET needs a per-band earliest-MJD reference so it
+  // computes its own first_mjd inside computeFleetTraces.
+  function mjdEnvelope(bands) {
+    let lo = Infinity, hi = -Infinity;
+    for (const b of bands || []) {
+      for (const p of b.points || []) {
+        if (!isFinite(p.mjd)) continue;
+        if (p.mjd < lo) lo = p.mjd;
+        if (p.mjd > hi) hi = p.mjd;
+      }
+    }
+    if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return null;
+    return { min: lo, max: hi };
+  }
+
+  // Project an overlay's {mjd, mag} grid through the active projection plus
+  // (optional) fold, return a sorted {x,y} array ready for Chart.js. Returns
+  // null for points the projection rejects (e.g. mag at non-positive flux
+  // after extinction brings it below zero — shouldn't happen in practice).
+  function projectOverlayGrid(gridMags, bandName, axisMode, distMod, extByBand, foldPeriod) {
+    const extMag = (extByBand || {})[bandName] || 0;
+    const pts = gridMags
+      .map(({ mjd, mag }) => {
+        const y = projectModel(mag, axisMode, distMod, extMag);
+        return y == null || !isFinite(y) ? null : { x: mjd, y };
+      })
+      .filter(Boolean);
+    return foldPeriod ? foldDataset(pts, foldPeriod) : pts;
+  }
+
+  function makeOverlayDataset(overlayKey, bandName, points) {
+    const color = BAND_COLORS[bandName] || BAND_COLORS.unknown;
+    const overlayLabel = overlayKey === "tde" ? "TDE tail" : overlayKey.toUpperCase();
+    return {
+      label: `${overlayLabel} ${bandName}`,
+      data: points,
+      borderColor: color,
+      backgroundColor: "transparent",
+      borderWidth: 1.5,
+      borderDash: OVERLAY_DASH[overlayKey] || [6, 4],
+      showLine: true,
+      spanGaps: false,
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      // Draw overlay on top of DR (-1) and default points (0) so a thin
+      // dashed line stays visible against a dense light curve.
+      order: 2,
+    };
+  }
+
+  function computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod) {
+    if (!fits || !fits.spm) return [];
+    const env = mjdEnvelope(bands);
+    if (!env) return [];
+    const NJY_PER_MJY = 1e6;  // SPM_A is mJy; our flux axis is nJy.
+    const traces = [];
+    for (const [band, p] of Object.entries(fits.spm)) {
+      if (!(p.gamma > 0 && p.tau_rise > 0 && p.tau_fall > 0)) continue;
+      const grid = [];
+      for (let i = 0; i < 100; i++) {
+        const t = ((env.max - env.min) * i) / 99;
+        const fluxNjy = spmFlux_mJy(t, p.A, p.beta, p.t0, p.gamma, p.tau_rise, p.tau_fall)
+                      * NJY_PER_MJY;
+        // Convert to mag via the survey ZP, skip non-positive (sigmoid tail
+        // can undershoot zero with extreme params — render as a gap).
+        if (!(fluxNjy > 0)) continue;
+        const mag = AB_ZP_NJY - 2.5 * Math.log10(fluxNjy);
+        grid.push({ mjd: env.min + t, mag });
+      }
+      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod);
+      if (pts.length) traces.push(makeOverlayDataset("spm", band, pts));
+    }
+    return traces;
+  }
+
+  // FLEET mag model — grows polynomially from t0, then levels to m0. Per-band
+  // first-MJD reference matches the extractor's: earliest alert detection in
+  // that band with flux > 1 µJy (= 1000 nJy in our units). We don't carry
+  // FP first-MJDs through the template, so alert-only is the best we can do
+  // without a new server round-trip; this agrees with the reference except
+  // when FP points precede the first alert (uncommon in the FLEET regime).
+  function fleetMag(t_norm, a, w, m0, t0) {
+    const dt = t_norm - t0;
+    return Math.exp(w * dt) - a * w * dt + m0;
+  }
+
+  function computeFleetTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod) {
+    if (!fits || !fits.fleet) return [];
+    const env = mjdEnvelope(bands);
+    if (!env) return [];
+    const FLUX_FLOOR_NJY = 1000;  // reference: > 1 µJy. Our units → 1000 nJy.
+    const traces = [];
+    for (const [band, p] of Object.entries(fits.fleet)) {
+      const inBand = (bands || []).find((b) => b.name === band);
+      if (!inBand) continue;
+      const mjdsBright = (inBand.points || [])
+        .filter((pt) => isFinite(pt.mjd) && isFinite(pt.flux) && pt.flux > FLUX_FLOOR_NJY)
+        .map((pt) => pt.mjd);
+      const firstMjdBand = mjdsBright.length ? Math.min(...mjdsBright) : env.min;
+      const grid = [];
+      for (let i = 0; i < 100; i++) {
+        const mjd = env.min + ((env.max - env.min) * i) / 99;
+        const mag = fleetMag(mjd - firstMjdBand, p.a, p.w, p.m0, p.t0);
+        if (!isFinite(mag)) continue;
+        grid.push({ mjd, mag });
+      }
+      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod);
+      if (pts.length) traces.push(makeOverlayDataset("fleet", band, pts));
+    }
+    return traces;
+  }
+
+  // TDE tail model: mag(t) = mag0 + decay · 2.5 · log10(t - t_peak + 40).
+  // t_peak is data-derived (not stored): brightest detection in-band passing
+  // e_mag < 1.0 and mag < 30, matching the extractor. We only have fluxes in
+  // the client, so we derive mag/e_mag from flux/eFlux (ZP 31.4 in nJy).
+  function computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod) {
+    if (!fits || !fits.tde) return [];
+    const traces = [];
+    for (const [band, p] of Object.entries(fits.tde)) {
+      const inBand = (bands || []).find((b) => b.name === band);
+      if (!inBand || !(inBand.points || []).length) continue;
+      const bandDets = inBand.points
+        .map((pt) => {
+          if (!(pt.flux > 0) || !isFinite(pt.mjd)) return null;
+          const mag = AB_ZP_NJY - 2.5 * Math.log10(pt.flux);
+          const eMag = pt.e_flux != null && pt.e_flux > 0
+            ? pt.e_flux / pt.flux / LN10_OVER_2P5 : null;
+          if (!isFinite(mag) || mag >= 30) return null;
+          if (eMag == null || !(eMag < 1.0)) return null;
+          return { mjd: pt.mjd, mag };
+        })
+        .filter(Boolean);
+      if (!bandDets.length) continue;
+      const tPeak = bandDets.reduce((best, d) => (d.mag < best.mag ? d : best)).mjd;
+      const bandMax = Math.max(...bandDets.map((d) => d.mjd));
+      if (!(bandMax > tPeak)) continue;
+      const grid = [];
+      for (let i = 0; i < 100; i++) {
+        const mjd = tPeak + ((bandMax - tPeak) * i) / 99;
+        const dt = mjd - tPeak;
+        if (dt <= 0) continue;
+        const mag = p.mag0 + p.decay * 2.5 * Math.log10(dt + 40);
+        if (!isFinite(mag)) continue;
+        grid.push({ mjd, mag });
+      }
+      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod);
+      if (pts.length) traces.push(makeOverlayDataset("tde", band, pts));
+    }
+    return traces;
+  }
+
+  function buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod) {
+    const fits = chart.$lcFits;
+    const key = chart.$lcOverlay;
+    if (!fits || !key || key === "none") return [];
+    const bands = (chart.$lcRaw && chart.$lcRaw.bands) || [];
+    if (key === "spm") return computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
+    if (key === "fleet") return computeFleetTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
+    if (key === "tde") return computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
+    return [];
+  }
+
+  // ── Param info strip ──────────────────────────────────────────────────────
+  // Per-band table of the fit parameters (plus χ² when present), shown under
+  // the toolbar when an overlay is active. The server already pruned entries
+  // that lacked any required param, so an overlay we armed is guaranteed to
+  // have at least one band worth rendering.
+  const OVERLAY_PARAM_LABELS = {
+    spm:   [["A", "A", 3], ["beta", "β", 3], ["t0", "t₀", 2], ["gamma", "γ", 2],
+            ["tau_rise", "τ↑", 2], ["tau_fall", "τ↓", 2], ["chi", "χ²", 3]],
+    fleet: [["a", "a", 3], ["w", "w", 4], ["m0", "m₀", 2], ["t0", "t₀", 2],
+            ["chi", "χ²", 2]],
+    tde:   [["mag0", "m₀", 2], ["decay", "k", 3], ["decay_chi", "χ²", 2]],
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  }
+
+  function renderOverlayInfo(chart) {
+    const strip = document.querySelector(`.lc-overlay-info[data-target="${chart.canvas.id}"]`);
+    if (!strip) return;
+    const key = chart.$lcOverlay;
+    const fits = chart.$lcFits;
+    if (!key || key === "none" || !fits || !fits[key]) {
+      strip.classList.add("tw-hidden");
+      strip.innerHTML = "";
+      return;
+    }
+    const perBand = fits[key];
+    const spec = OVERLAY_PARAM_LABELS[key] || [];
+    const lines = Object.entries(perBand)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([band, params]) => {
+        const color = BAND_COLORS[band] || BAND_COLORS.unknown;
+        const parts = spec.map(([k, label, digits]) => {
+          const v = params[k];
+          const disp = v != null && isFinite(v) ? v.toFixed(digits) : "—";
+          return `${label}=<b>${escapeHtml(disp)}</b>`;
+        });
+        return `<span style="color:${color}">${escapeHtml(band)}</span>&nbsp;&nbsp;${parts.join("&nbsp;&nbsp;")}`;
+      });
+    strip.innerHTML = lines.join("<br>");
+    strip.classList.remove("tw-hidden");
+  }
+
   function buildDatasets(bands, fpBands, drBands, axisMode, sourceMode, distMod, extByBand, drAlpha, foldPeriod) {
     const extFor = (name) => (extByBand || {})[name] || 0;
     const project = (band) => {
@@ -363,10 +621,13 @@
     const drBands = chart.$lcDrShown ? (chart.$lcDrBands || []) : [];
     const foldPeriod =
       chart.$lcFold === "fold" && chart.$lcPeriod > 0 ? chart.$lcPeriod : null;
-    chart.data.datasets = buildDatasets(
+    const baseDatasets = buildDatasets(
       raw.bands, raw.fpBands, drBands, axisMode, sourceMode, distMod, extByBand,
       chart.$lcDrAlpha, foldPeriod,
     );
+    const overlayDatasets = buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod);
+    chart.data.datasets = [...baseDatasets, ...overlayDatasets];
+    renderOverlayInfo(chart);
     const x = chart.options.scales.x;
     if (foldPeriod) {
       x.title.text = `Phase (P = ${foldPeriod.toPrecision(6)} d)`;
@@ -518,6 +779,18 @@
       },
     });
     chart.$lcRaw = { bands, fpBands };
+    // Parametric-fit bundle from the server; {} when none available. Used by
+    // buildOverlayDatasets + renderOverlayInfo; the select's options are
+    // pre-disabled server-side for overlays this object has no data for.
+    chart.$lcFits = (data.parametric_fits && typeof data.parametric_fits === "object")
+      ? data.parametric_fits : {};
+    // Restore overlay only if the corresponding fit actually exists for this
+    // object. An old URL from a different object might carry lc_overlay=spm
+    // when this one only has fleet; demote to "none" rather than arming a
+    // dead overlay.
+    const restoredOverlay = restored.overlay && chart.$lcFits[restored.overlay]
+      ? restored.overlay : "none";
+    chart.$lcOverlay = restoredOverlay;
     chart.$lcMode = initialAxisMode;
     chart.$lcSource = initialSourceMode;
     chart.$lcAbs = restored.abs === "abs" ? "abs" : "app";
@@ -862,6 +1135,37 @@
     input.addEventListener("input", handler);
   }
 
+  // Parametric-fit overlay picker (SPM / FLEET / TDE tail). Kept as a plain
+  // <select> rather than a cycle button because the value space is 4-wide
+  // and at most one overlay makes sense at a time (no "off" wrapper needed).
+  function bindOverlaySelect(sel) {
+    if (sel.$bound) return;
+    sel.$bound = true;
+    const canvas = document.getElementById(sel.dataset.target);
+    const chart = canvas && charts.get(canvas);
+    if (chart) {
+      // Seed the dropdown from whatever state initCanvas restored — may have
+      // been demoted from the URL's request if the overlay doesn't exist on
+      // this object.
+      sel.value = chart.$lcOverlay || "none";
+    }
+    sel.addEventListener("change", () => {
+      const cv = document.getElementById(sel.dataset.target);
+      const c = cv && charts.get(cv);
+      if (!c) return;
+      const next = sel.value;
+      // Guard against a user picking a disabled option via keyboard (all
+      // major browsers block this already, but belt-and-braces):
+      if (next !== "none" && !(c.$lcFits && c.$lcFits[next])) {
+        sel.value = c.$lcOverlay || "none";
+        return;
+      }
+      c.$lcOverlay = next;
+      applyModes(c);
+      cacheAndPushLcState(c);
+    });
+  }
+
   function initToggles(root) {
     const scope = root || document;
     for (const spec of Object.values(TOGGLE_SPECS)) {
@@ -871,6 +1175,7 @@
     scope.querySelectorAll(".lc-ebv-input").forEach(bindEbvInput);
     scope.querySelectorAll(".lc-dr-toggle").forEach(bindDrButton);
     scope.querySelectorAll(".lc-dr-alpha").forEach(bindDrAlphaSlider);
+    scope.querySelectorAll(".lc-overlay-select").forEach(bindOverlaySelect);
   }
 
   function initAll(root) {

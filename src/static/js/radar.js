@@ -41,6 +41,20 @@
   function applyGroup(chart, group) {
     chart.data = buildData(group);
     chart.update();
+    recordActive(group);
+  }
+
+  // Surface the active group's top class + classifier as window globals so
+  // "Back to results" can fill a missing `class_name` filter with the object's
+  // dominant prediction under the same classifier the user was looking at.
+  // Deep-linking into a detail view with only `classifier=` in the URL and
+  // hitting Back would otherwise return an unfiltered listing.
+  function recordActive(group) {
+    if (!group) return;
+    const top = (group.classes || []).find((c) => c.is_max) || group.classes?.[0];
+    if (!top) return;
+    window._currentObjectClass = top.class_name;
+    window._currentObjectClassifier = group.classifier_name;
   }
 
   function initCanvas(canvas) {
@@ -96,6 +110,7 @@
     });
     chart.$radarCtx = ctx;
     charts.set(canvas, chart);
+    recordActive(group);
   }
 
   function bindPicker(select) {

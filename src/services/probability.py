@@ -19,8 +19,15 @@ def _group_key(row: dict[str, Any]) -> str:
     return f"{name} v{version}" if version else name
 
 
-def shape_probability_context(raw: Any, *, survey: str) -> dict[str, Any]:
+def shape_probability_context(
+    raw: Any, *, survey: str, classifier: str | None = None
+) -> dict[str, Any]:
     """Group raw probability rows by classifier+version; pick a default.
+
+    `classifier` is an optional override (as passed through from a deep-link
+    URL) — when present, the group whose `classifier_name` matches wins the
+    `default_key` slot, so the radar opens on the classifier the user linked
+    to rather than the survey's default.
 
     Output:
       {
@@ -68,19 +75,29 @@ def shape_probability_context(raw: Any, *, survey: str) -> dict[str, Any]:
                 c["is_max"] = c["probability"] == top
         groups.append(group)
 
-    # Default: match the survey's primary classifier if present; otherwise
-    # the first group we see.
-    default_name = SC(survey).default_classifier
-    default_key = next(
-        (g["key"] for g in groups if g["classifier_name"] == default_name), None
-    )
+    # Default selection, in order of preference:
+    #   1. explicit `classifier` override (from a deep-link URL)
+    #   2. the survey's primary classifier
+    #   3. the first group we see
+    default_key: str | None = None
+    if classifier:
+        default_key = next(
+            (g["key"] for g in groups if g["classifier_name"] == classifier), None
+        )
+    if default_key is None:
+        default_name = SC(survey).default_classifier
+        default_key = next(
+            (g["key"] for g in groups if g["classifier_name"] == default_name), None
+        )
     if default_key is None and groups:
         default_key = groups[0]["key"]
 
     return {"groups": groups, "default_key": default_key}
 
 
-async def get_probability_context(*, survey: str, oid: str) -> dict[str, Any]:
+async def get_probability_context(
+    *, survey: str, oid: str, classifier: str | None = None
+) -> dict[str, Any]:
     cfg = SC(survey)
     raw = await alerce_client._get(cfg.prob_url(oid))
-    return shape_probability_context(raw, survey=survey)
+    return shape_probability_context(raw, survey=survey, classifier=classifier)

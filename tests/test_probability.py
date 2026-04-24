@@ -58,6 +58,30 @@ def test_classes_sorted_by_probability_desc_and_max_flag_set():
     assert [c["is_max"] for c in classes] == [True, False, False]
 
 
+def test_classifier_override_wins_default_key_over_survey_primary():
+    """Deep-link URLs carry the classifier the user was searching under;
+    shape must prefer that group even when the survey's primary classifier
+    is also present."""
+    raw = [
+        _row("lc_classifier_top", "1.0", "SN", 0.8),
+        _row("lc_classifier_BHRF_forced_phot", "2.0", "SN", 0.7),
+    ]
+    out = shape_probability_context(
+        raw, survey="lsst", classifier="lc_classifier_BHRF_forced_phot"
+    )
+    assert out["default_key"] == "lc_classifier_BHRF_forced_phot v2.0"
+
+
+def test_classifier_override_falls_back_when_no_match():
+    """Unknown classifier override → survey primary wins."""
+    raw = [
+        _row("lc_classifier_top", "1.0", "SN", 0.8),
+        _row("lc_classifier_transient", "2.0", "SN", 0.5),
+    ]
+    out = shape_probability_context(raw, survey="lsst", classifier="not_a_classifier")
+    assert out["default_key"] == "lc_classifier_top v1.0"
+
+
 def test_rows_missing_class_name_are_dropped():
     raw = [
         _row("lc_classifier", "1", "SN", 0.9),
