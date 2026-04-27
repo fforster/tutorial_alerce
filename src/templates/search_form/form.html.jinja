@@ -1,19 +1,26 @@
 {% from "input.html.jinja" import input as customInput %}
+{#
+  Search filter form. Sized down (~one Tailwind step) from the previous
+  pass: section title is `tw-text-sm`, labels and controls land on
+  `tw-text-xs`, and the customInput macro is invoked with
+  `text_size="tw-text-xs"` so the inputs match. Keeps the panel readable
+  but lets it fit more rows without scrolling.
+#}
 <div
   id="form-search"
   data-survey="{{ survey }}"
   hx-ext="response-targets"
-  class="tw-p-4 tw-flex tw-flex-col tw-gap-4"
+  class="tw-p-4 tw-flex tw-flex-col tw-gap-3"
 >
-  <div class="tw-text-base tw-font-medium">Search Filters</div>
+  <div class="tw-text-sm tw-font-medium">Search Filters</div>
 
   <div>
-    <p class="tw-text-sm tw-text-text-secondary tw-mb-2">Survey</p>
+    <p class="tw-text-xs tw-text-text-secondary tw-mb-1">Survey</p>
     <div id="survey-toggle" class="tw-flex tw-gap-2">
       <button
         type="button"
         data-survey-value="lsst"
-        class="tw-px-3 tw-py-1 tw-text-sm tw-rounded tw-cursor-pointer
+        class="tw-px-3 tw-py-0.5 tw-text-xs tw-rounded tw-cursor-pointer
           {% if survey == 'lsst' %}tw-bg-accent tw-text-bg-primary{% else %}tw-border tw-border-border tw-text-text-secondary{% endif %}"
         hx-get="{{ API_URL }}/htmx/search_objects/?survey=lsst"
         hx-target="#search-form-slot"
@@ -22,7 +29,7 @@
       <button
         type="button"
         data-survey-value="ztf"
-        class="tw-px-3 tw-py-1 tw-text-sm tw-rounded tw-cursor-pointer
+        class="tw-px-3 tw-py-0.5 tw-text-xs tw-rounded tw-cursor-pointer
           {% if survey == 'ztf' %}tw-bg-accent tw-text-bg-primary{% else %}tw-border tw-border-border tw-text-text-secondary{% endif %}"
         hx-get="{{ API_URL }}/htmx/search_objects/?survey=ztf"
         hx-target="#search-form-slot"
@@ -32,57 +39,140 @@
   </div>
 
   <div>
-    <label class="tw-text-sm tw-text-text-secondary tw-block tw-mb-1" for="objectIds">Object ID</label>
-    {{ customInput(id="objectIds", type="text", placeholder="comma-separated OIDs", value=selected_oids or "") }}
+    <label class="tw-text-xs tw-text-text-secondary tw-block tw-mb-1" for="objectIds">Object ID</label>
+    {{ customInput(id="objectIds", type="text", placeholder="comma-separated OIDs", value=selected_oids or "", text_size="tw-text-xs") }}
   </div>
 
   <div>
-    <label class="tw-text-sm tw-text-text-secondary tw-block tw-mb-1" for="classifier">Classifier</label>
+    <label class="tw-text-xs tw-text-text-secondary tw-block tw-mb-1" for="classifier">Classifier</label>
     <select
       id="classifier"
-      class="tw-w-full tw-bg-bg-tertiary tw-border tw-border-border tw-rounded tw-py-1 tw-px-2 tw-text-sm"
+      class="tw-w-full tw-bg-bg-tertiary tw-border tw-border-border tw-rounded tw-py-1 tw-px-2 tw-text-xs"
       hx-get="{{ API_URL }}/htmx/classes_select"
       hx-trigger="change"
       hx-target="#class_name"
       hx-swap="innerHTML"
       hx-vals='js:{...send_classes_data()}'
+      onchange="window.refillClassifierVersions && window.refillClassifierVersions()"
     >
-      <option value="" data-classes="[]">(any)</option>
+      {#
+        Each option carries the available class list AND the available
+        versions for the classifier as JSON-encoded data attrs, plus the
+        lexicographic-max version as `data-latest-version`. helpers.js
+        reads these on submit so "Latest" resolves to a concrete version
+        string before the upstream call.
+      #}
+      <option value="" data-classes="[]" data-versions="[]" data-latest-version="">(any)</option>
       {% for c in classifiers %}
-        <option value="{{ c.classifier_name }}" data-classes='{{ c.classes|tojson }}'
-          {% if selected_classifier and selected_classifier == c.classifier_name %}selected{% endif %}>
+        <option
+          value="{{ c.classifier_name }}"
+          data-classes='{{ c.classes|tojson }}'
+          data-versions='{{ c.versions|tojson }}'
+          data-latest-version="{{ c.latest_version or '' }}"
+          {% if selected_classifier and selected_classifier == c.classifier_name %}selected{% endif %}
+        >
           {{ c.formatted_name }}
         </option>
       {% endfor %}
     </select>
   </div>
 
-  <div>
-    <label class="tw-text-sm tw-text-text-secondary tw-block tw-mb-1" for="class_name">Class</label>
-    <select
-      id="class_name"
-      class="tw-w-full tw-bg-bg-tertiary tw-border tw-border-border tw-rounded tw-py-1 tw-px-2 tw-text-sm"
-    >
-      <option value="">(any)</option>
-      {#
-        On a deep-link with both classifier and class_name in the URL, the
-        dependent select is normally empty until the classifier `change` event
-        fires and triggers /htmx/classes_select — which never happens on load,
-        so the selection would be lost. Pre-render the chosen classifier's
-        class list server-side to avoid that gap.
-      #}
-      {% if selected_classifier %}
-        {% for c in classifiers if c.classifier_name == selected_classifier %}
-          {% for cls in c.classes %}
-            <option value="{{ cls }}" {% if cls == selected_class_name %}selected{% endif %}>{{ cls }}</option>
+  {#
+    Class + classifier-version live side-by-side because they're both
+    classifier-scoped: changing the classifier rewires both lists.
+    classes_select runs server-side via htmx (existing pattern); versions
+    are repopulated client-side from `data-versions` on the classifier
+    option (refillClassifierVersions, defined inline below the row).
+  #}
+  <div class="tw-grid tw-grid-cols-2 tw-gap-2">
+    <div>
+      <label class="tw-text-xs tw-text-text-secondary tw-block tw-mb-1" for="class_name">Class</label>
+      <select
+        id="class_name"
+        class="tw-w-full tw-bg-bg-tertiary tw-border tw-border-border tw-rounded tw-py-1 tw-px-2 tw-text-xs"
+      >
+        <option value="">(any)</option>
+        {#
+          On a deep-link with both classifier and class_name in the URL, the
+          dependent select is normally empty until the classifier `change` event
+          fires and triggers /htmx/classes_select — which never happens on load,
+          so the selection would be lost. Pre-render the chosen classifier's
+          class list server-side to avoid that gap.
+        #}
+        {% if selected_classifier %}
+          {% for c in classifiers if c.classifier_name == selected_classifier %}
+            {% for cls in c.classes %}
+              <option value="{{ cls }}" {% if cls == selected_class_name %}selected{% endif %}>{{ cls }}</option>
+            {% endfor %}
           {% endfor %}
-        {% endfor %}
-      {% endif %}
-    </select>
+        {% endif %}
+      </select>
+    </div>
+    <div>
+      <label class="tw-text-xs tw-text-text-secondary tw-block tw-mb-1" for="classifier_version">Version</label>
+      {#
+        Three modes:
+          - "latest" (default): helpers.js resolves to the classifier's
+            data-latest-version on submit. So "Latest" is concrete: the same
+            specific version always lands on the wire, the user just
+            doesn't have to know which.
+          - "any": don't send classifier_version upstream — useful when
+            comparing classifications across versions.
+          - <specific>: pinned. Repopulated server-side on deep-link, and
+            client-side whenever the classifier select fires `change`.
+      #}
+      <select
+        id="classifier_version"
+        class="tw-w-full tw-bg-bg-tertiary tw-border tw-border-border tw-rounded tw-py-1 tw-px-2 tw-text-xs"
+      >
+        <option value="latest" {% if not selected_classifier_version or selected_classifier_version == "latest" %}selected{% endif %}>Latest</option>
+        <option value="any" {% if selected_classifier_version == "any" %}selected{% endif %}>Any</option>
+        {% if selected_classifier %}
+          {% for c in classifiers if c.classifier_name == selected_classifier %}
+            {% for v in c.versions %}
+              <option value="{{ v }}" {% if v == selected_classifier_version %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+          {% endfor %}
+        {% endif %}
+      </select>
+    </div>
   </div>
 
+  <script>
+    // Rebuilds the version select when the classifier select changes. Reads
+    // the chosen classifier option's `data-versions` (JSON list); falls back
+    // to an empty list when the user picks "(any)" or the option is missing
+    // the attr. Keeps the user's mode if it still applies (e.g. "latest"
+    // and "any" always do); otherwise resets to "latest" since the previous
+    // pinned version is meaningless under the new classifier.
+    window.refillClassifierVersions = function () {
+      const sel = document.getElementById("classifier");
+      const verSel = document.getElementById("classifier_version");
+      if (!sel || !verSel) return;
+      let versions = [];
+      try {
+        versions = JSON.parse(sel.options[sel.selectedIndex]?.dataset?.versions ?? "[]");
+      } catch { versions = []; }
+      const prev = verSel.value;
+      verSel.innerHTML = "";
+      const optLatest = document.createElement("option");
+      optLatest.value = "latest"; optLatest.textContent = "Latest";
+      verSel.appendChild(optLatest);
+      const optAny = document.createElement("option");
+      optAny.value = "any"; optAny.textContent = "Any";
+      verSel.appendChild(optAny);
+      versions.forEach((v) => {
+        const o = document.createElement("option");
+        o.value = v; o.textContent = v;
+        verSel.appendChild(o);
+      });
+      const stillValid = prev === "latest" || prev === "any" || versions.includes(prev);
+      verSel.value = stillValid ? prev : "latest";
+    };
+  </script>
+
   <div>
-    <label class="tw-text-sm tw-text-text-secondary tw-block">
+    <label class="tw-text-xs tw-text-text-secondary tw-block">
       Probability ≥ <span id="prob_number" class="mono">{{ "%.2f"|format(selected_probability or 0) }}</span>
     </label>
     <input
@@ -93,26 +183,167 @@
   </div>
 
   <div>
-    <p class="tw-text-sm tw-text-text-secondary tw-mb-1">Number of detections</p>
+    <p class="tw-text-xs tw-text-text-secondary tw-mb-1">Number of detections</p>
     <div class="tw-flex tw-gap-2">
-      {{ customInput(id="min_detections", type="number", placeholder="Min", width="tw-w-1/2", value=selected_n_det_min if selected_n_det_min is not none else "") }}
-      {{ customInput(id="max_detections", type="number", placeholder="Max", width="tw-w-1/2", value=selected_n_det_max if selected_n_det_max is not none else "") }}
+      {{ customInput(id="min_detections", type="number", placeholder="Min", width="tw-w-1/2", value=selected_n_det_min if selected_n_det_min is not none else "", text_size="tw-text-xs") }}
+      {{ customInput(id="max_detections", type="number", placeholder="Max", width="tw-w-1/2", value=selected_n_det_max if selected_n_det_max is not none else "", text_size="tw-text-xs") }}
     </div>
   </div>
 
-  <button
-    type="button"
-    class="tw-mt-2 tw-bg-accent tw-text-bg-primary tw-text-sm tw-font-medium tw-py-2 tw-rounded hover:tw-bg-accent-hover"
-    hx-get="{{ API_URL }}/htmx/list_objects"
-    hx-trigger="click"
-    hx-target="#results-slot"
-    hx-swap="innerHTML"
-    hx-indicator="#results-loading"
-    hx-vals='js:{...send_form_Data()}'
-  >Search</button>
+  {#
+    Discovery date — accepts free-text MJD, JD (>2400000), or any ISO/UTC
+    date string. coords.js::smartDateToMJD does the parsing client-side, so
+    the server-side payload only ever sees a parsed `firstmjd_min` /
+    `firstmjd_max` float (the upstream APIs take `firstmjd` as a list of
+    one or two floats). `onchange` rewrites the field with the parsed MJD.
+
+    Each row pairs the free-text field with a small calendar button that
+    opens a hidden `<input type="datetime-local">`'s native picker via
+    `showPicker()`. When the user picks a UTC datetime, coords.js converts
+    it to MJD and writes back to the visible text field — same field both
+    paths feed.
+  #}
+  {#
+    Wrapped in a native <details> so the section collapses by default and
+    the form starts shorter — same UX as the prototype. The block stays
+    open if the URL deep-links to this filter (any of firstmjd_min/max
+    set), so a shared link doesn't hide the value the user is asking
+    about. `marker:tw-hidden` swaps the browser's default triangle for our
+    own chevron span (rotates via the open: variant).
+  #}
+  <details {% if selected_firstmjd_min is not none or selected_firstmjd_max is not none %}open{% endif %} class="tw-group">
+    <summary class="tw-text-xs tw-text-text-secondary tw-mb-1 tw-cursor-pointer tw-flex tw-items-center tw-gap-1 marker:tw-hidden tw-list-none">
+      <span class="tw-text-text-muted tw-transition-transform group-open:tw-rotate-90">▸</span>
+      Discovery date (UTC)
+    </summary>
+    <div class="tw-grid tw-grid-cols-2 tw-gap-2">
+      <div class="tw-flex tw-items-center tw-gap-1">
+        {{ customInput(id="filter-date-from", type="text", placeholder="From: MJD/JD/date", width="tw-flex-1 tw-min-w-0", value=selected_firstmjd_min if selected_firstmjd_min is not none else "", text_size="tw-text-xs") }}
+        <input
+          id="filter-date-from-cal"
+          type="datetime-local"
+          step="1"
+          class="tw-hidden"
+          onchange="window.calendarPickerToMJD('filter-date-from-cal', 'filter-date-from')"
+        />
+        <button
+          type="button"
+          class="tw-flex-none tw-p-1 tw-text-text-muted hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+          title="Pick UTC date / time"
+          onclick="document.getElementById('filter-date-from-cal').showPicker && document.getElementById('filter-date-from-cal').showPicker()"
+          aria-label="Open date picker for From"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
+        </button>
+      </div>
+      <div class="tw-flex tw-items-center tw-gap-1">
+        {{ customInput(id="filter-date-to", type="text", placeholder="To: MJD/JD/date", width="tw-flex-1 tw-min-w-0", value=selected_firstmjd_max if selected_firstmjd_max is not none else "", text_size="tw-text-xs") }}
+        <input
+          id="filter-date-to-cal"
+          type="datetime-local"
+          step="1"
+          class="tw-hidden"
+          onchange="window.calendarPickerToMJD('filter-date-to-cal', 'filter-date-to')"
+        />
+        <button
+          type="button"
+          class="tw-flex-none tw-p-1 tw-text-text-muted hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+          title="Pick UTC date / time"
+          onclick="document.getElementById('filter-date-to-cal').showPicker && document.getElementById('filter-date-to-cal').showPicker()"
+          aria-label="Open date picker for To"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
+        </button>
+      </div>
+    </div>
+    <p class="tw-text-[10px] tw-text-text-muted tw-mt-1">
+      Accepts MJD, JD (&gt; 2 400 000), or UTC date (e.g. <span class="mono">2024-06-15</span>). Stored as MJD.
+    </p>
+  </details>
+
+  {#
+    Conesearch — same collapse pattern as Discovery date. Auto-expands when
+    deep-linked with ra+dec or a custom radius. Name resolver (CDS Sesame)
+    fills the coords field with "ra dec" in degrees; the field accepts free
+    text in plain degrees, comma-separated, HMS/DMS with colons, or
+    HHhMMmSSs notation (parseCoordinates in coords.js). On submit,
+    helpers.js parses again and adds ra/dec/radius to the payload.
+  #}
+  <details {% if (selected_ra is not none and selected_dec is not none) or selected_radius is not none %}open{% endif %} class="tw-group">
+    <summary class="tw-text-xs tw-text-text-secondary tw-mb-1 tw-cursor-pointer tw-flex tw-items-center tw-gap-1 marker:tw-hidden tw-list-none">
+      <span class="tw-text-text-muted tw-transition-transform group-open:tw-rotate-90">▸</span>
+      Conesearch
+    </summary>
+    <div class="tw-flex tw-gap-1">
+      <input
+        id="filter-name"
+        type="text"
+        placeholder="Name (e.g. SN2024abc)"
+        class="tw-flex-1 tw-min-w-0 tw-bg-transparent tw-border-b tw-border-border tw-py-1 tw-px-2 tw-text-xs tw-text-text-primary tw-placeholder-text-muted focus:tw-outline-none focus:tw-border-accent"
+      />
+      <button
+        type="button"
+        id="filter-name-btn"
+        class="tw-flex-none tw-px-2 tw-py-0.5 tw-text-[11px] tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+        title="Resolve name via CDS Sesame and fill the RA/Dec field below."
+        onclick="
+          (async () => {
+            this.disabled = true;
+            const ok = await window.resolveNameInto('filter-name', 'filter-coords');
+            this.disabled = false;
+            this.title = ok ? 'Resolved.' : 'Could not resolve. Try entering RA/Dec manually.';
+          })();
+        "
+      >Resolve</button>
+    </div>
+    <input
+      id="filter-coords"
+      type="text"
+      placeholder="RA Dec (e.g. 2.365 -30.273 or 10:20:30 -27:30:40)"
+      value="{% if selected_ra is not none and selected_dec is not none %}{{ '%.6f'|format(selected_ra) }} {{ '%.6f'|format(selected_dec) }}{% endif %}"
+      onchange="window.normalizeCoordsField('filter-coords')"
+      class="tw-w-full tw-mt-2 tw-bg-transparent tw-border-b tw-border-border tw-py-1 tw-px-2 tw-text-xs tw-text-text-primary tw-placeholder-text-muted focus:tw-outline-none focus:tw-border-accent"
+    />
+    <div class="tw-flex tw-items-center tw-gap-2 tw-mt-2">
+      <label class="tw-text-[11px] tw-text-text-muted tw-flex-none" for="filter-radius">Radius (arcsec)</label>
+      {{ customInput(id="filter-radius", type="number", placeholder="30", width="tw-w-20", value=selected_radius if selected_radius is not none else "", text_size="tw-text-xs") }}
+    </div>
+  </details>
+
+  {#
+    Action row — large primary Search + compact Clear. Clear is a plain
+    `<a href>` to `/?survey=<current>` so the browser does a full page
+    reload: the URL drops back to the survey-only form, the results-slot
+    falls back to its empty-hint default, and every filter (form + URL +
+    JS state) gets wiped without us having to touch each input by hand.
+  #}
+  <div class="tw-flex tw-gap-2 tw-mt-1">
+    <button
+      type="button"
+      class="tw-flex-1 tw-bg-accent tw-text-bg-primary tw-text-base tw-font-semibold tw-py-3 tw-rounded hover:tw-bg-accent-hover tw-flex tw-items-center tw-justify-center tw-gap-2"
+      hx-get="{{ API_URL }}/htmx/list_objects"
+      hx-trigger="click"
+      hx-target="#results-slot"
+      hx-swap="innerHTML"
+      hx-indicator="#results-loading"
+      hx-vals='js:{...send_form_Data()}'
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Search
+    </button>
+    <a
+      href="/?survey={{ survey }}"
+      class="tw-flex-none tw-px-3 tw-py-3 tw-text-xs tw-text-text-muted hover:tw-text-text-primary tw-border tw-border-border tw-rounded tw-flex tw-items-center tw-justify-center tw-gap-1"
+      title="Clear all filters (keeps the current survey)."
+      aria-label="Clear all filters"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6l-2 14H7L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+      Clear
+    </a>
+  </div>
 
   {% if classifiers|length == 0 %}
-  <div class="tw-text-xs tw-text-text-muted tw-mt-2">
+  <div class="tw-text-[10px] tw-text-text-muted tw-mt-1">
     Classifier list is empty — upstream API may be unreachable.
   </div>
   {% endif %}

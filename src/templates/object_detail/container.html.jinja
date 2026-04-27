@@ -14,48 +14,13 @@
   {% if classifier %}data-classifier="{{ classifier }}"{% endif %}
 >
 
-  <div class="tw-flex tw-items-center tw-gap-2">
-    {# Restores the previously cached listing HTML (no network call). Falls
-       back to /htmx/list_objects only if no cache exists (deep-link). #}
-    <button
-      type="button"
-      class="tw-px-3 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded tw-flex-none"
-      onclick="backToResults()"
-    >← Back to results</button>
-    {# Page-of-OIDs chip row — populated by object_nav.js from window._resultsNav.
-       Current OID is highlighted; chips are click-to-navigate. Horizontal scroll
-       so 20 long LSST ids fit without wrapping the header. #}
-    {# Single-row, font-size auto-scaled in JS to fit container width (see
-       fitOidListFont in object_nav.js). #}
-    <div
-      id="object-nav-list"
-      class="tw-flex tw-items-center tw-gap-0.5 tw-min-w-0 tw-flex-1 tw-overflow-hidden tw-whitespace-nowrap mono"
-      style="font-size: 12px;"
-    ></div>
-    {# Prev/next arrows walk through the current page of results; when the
-       current OID is at the edge they hop to the previous/next page and pick
-       the appropriate sibling. Keyboard ArrowLeft/ArrowRight mirror them.
-       Hidden by default — object_nav.js reveals them iff nav state exists. #}
-    <div id="object-nav" class="tw-hidden tw-items-center tw-gap-2 tw-flex-none">
-      <button
-        type="button"
-        id="object-nav-prev"
-        class="tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
-        title="Previous object (←)"
-        onclick="navObject('prev')"
-      >←</button>
-      {# Position indicator — "3/20 · page 2" — populated by object_nav.js. #}
-      <span id="object-nav-position" class="tw-text-xs tw-text-text-muted mono"></span>
-      <button
-        type="button"
-        id="object-nav-next"
-        class="tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
-        title="Next object (→)"
-        onclick="navObject('next')"
-      >→</button>
-    </div>
-  </div>
-
+  {#
+    Nav row (Back / OID dots / prev-next arrows + position) used to live
+    here as the first child. It was promoted to the global header in
+    index.html.jinja (#detail-nav-bar) so the detail panels can use the
+    full vertical space. object_nav.js shows/hides the bar based on
+    whether `#object-detail` (this element) is in the DOM.
+  #}
   <div class="tw-grid tw-grid-cols-4 tw-gap-3">
     <div
       id="basic-info-slot"

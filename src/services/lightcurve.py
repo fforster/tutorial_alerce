@@ -51,6 +51,13 @@ def _bucket_by_band(normalized: list[dict[str, Any]], cfg) -> list[dict[str, Any
                 # panel from a chart click without another round trip.
                 "identifier": d.get("identifier"),
                 "has_stamp": d.get("has_stamp", False),
+                # ZTF only: ±1 for brightening/dimming relative to the
+                # reference. `flux` above is |diff flux| (converted from a
+                # positive magnitude), so consumers that need the *signed*
+                # diff flux (e.g. the FLEET overlay's anchor search, which
+                # must match the extractor's `brightness > 1 µJy` signed
+                # filter) multiply flux by this sign. None on LSST.
+                "isdiffpos": d.get("isdiffpos"),
             }
         )
     ordered = [

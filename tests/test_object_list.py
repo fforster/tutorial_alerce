@@ -12,35 +12,107 @@ def test_build_search_params_drops_empty_fields():
         or p == {"page": 1, "page_size": 20, "count": False}
 
 
-def test_build_search_params_lsst_uses_range_fields():
+def test_build_search_params_lsst_sends_n_det_range_as_list():
+    """LSST list_objects accepts `n_det` as a list `[min, max]` (FastAPI
+    repeated-query-param encoding for list[int]). ZTF's `_ztf_extra_params`
+    later renames the key to `ndet`; the list value passes through as-is."""
     p = build_search_params(
         survey="lsst",
         classifier="lc_classifier_top", class_name="SN",
         probability=0.5, n_det_min=5, n_det_max=50,
         oid=None, page=2, page_size=20,
     )
-    assert p["n_det_min"] == 5
-    assert p["n_det_max"] == 50
-    assert "n_det" not in p
+    assert p["n_det"] == [5, 50]
+    assert "n_det_min" not in p
+    assert "n_det_max" not in p
     assert p["probability"] == 0.5
     assert p["page"] == 2
 
 
-def test_build_search_params_ztf_keeps_n_det():
+def test_build_search_params_ztf_min_only_uses_singleton_list():
+    """Min-only collapses to `[min]` — the API treats a single-element
+    list as an open-ended minimum (verified empirically). ZTF
+    `_ztf_extra_params` later renames `n_det` → `ndet`."""
     p = build_search_params(
         survey="ztf",
         classifier=None, class_name=None,
         probability=None, n_det_min=5, n_det_max=None,
         oid=None, page=1, page_size=20,
     )
-    # ZTF extra_params rewrites n_det → ndet later; here we still carry n_det.
-    assert p.get("n_det") == 5
+    assert p.get("n_det") == [5]
+
+
+def test_build_search_params_firstmjd_range_as_list():
+    """Discovery-date range mirrors n_det: `firstmjd: list[float]` as per
+    the production Filters model. Two-ended range → two-element list."""
+    p = build_search_params(
+        survey="lsst",
+        classifier=None, class_name=None,
+        probability=None, n_det_min=None, n_det_max=None,
+        firstmjd_min=60000.0, firstmjd_max=60100.0,
+        oid=None, page=1, page_size=20,
+    )
+    assert p["firstmjd"] == [60000.0, 60100.0]
+
+
+def test_build_search_params_firstmjd_min_only_singleton():
+    p = build_search_params(
+        survey="ztf",
+        classifier=None, class_name=None,
+        probability=None, n_det_min=None, n_det_max=None,
+        firstmjd_min=60000.0, firstmjd_max=None,
+        oid=None, page=1, page_size=20,
+    )
+    assert p["firstmjd"] == [60000.0]
+
+
+def test_build_search_params_conesearch_attaches_radius_with_default():
+    """ra+dec without explicit radius → 30" default (matches the prototype's
+    UI default and the placeholder in the form input)."""
+    p = build_search_params(
+        survey="lsst",
+        classifier=None, class_name=None,
+        probability=None, n_det_min=None, n_det_max=None,
+        ra=150.0, dec=2.0,
+        oid=None, page=1, page_size=20,
+    )
+    assert p["ra"] == 150.0
+    assert p["dec"] == 2.0
+    assert p["radius"] == 30.0
+
+
+def test_build_search_params_conesearch_skipped_without_full_pair():
+    """ra alone (no dec) → no cone search at all, since the upstream API
+    requires both. Same for dec alone."""
+    p = build_search_params(
+        survey="lsst",
+        classifier=None, class_name=None,
+        probability=None, n_det_min=None, n_det_max=None,
+        ra=150.0, dec=None,
+        oid=None, page=1, page_size=20,
+    )
+    assert "ra" not in p
+    assert "dec" not in p
+    assert "radius" not in p
+
+
+def test_build_search_params_max_only_uses_zero_lower_bound():
+    """Max-only collapses to `[0, max]` — saves us from carrying a
+    "max-only" branch through the param remap and ext-params plumbing."""
+    p = build_search_params(
+        survey="lsst",
+        classifier=None, class_name=None,
+        probability=None, n_det_min=None, n_det_max=42,
+        oid=None, page=1, page_size=20,
+    )
+    assert p.get("n_det") == [0, 42]
 
 
 def test_shape_response_normalizes_ztf_fields():
     raw = {
         "items": [
-            {"oid": "ZTF00", "ndet": 42, "class": "SN", "classifier": "lc_classifier"},
+            {"oid": "ZTF00", "ndet": 42, "class": "SN", "classifier": "lc_classifier",
+             "step_id_corr": "27.5.7a32.dev1"},
         ],
         "next": 2,
     }
@@ -49,6 +121,12 @@ def test_shape_response_normalizes_ztf_fields():
     assert row["n_det"] == 42
     assert row["class_name"] == "SN"
     assert row["classifier_name"] == "lc_classifier"
+    # step_id_corr is the correction / feature-extractor pipeline step ID,
+    # NOT the classifier model version (the prototype conflated them). We
+    # keep it as `pipeline_version` so callers can surface it when useful,
+    # and we leave `classifier_version` unset on ZTF rows.
+    assert row["pipeline_version"] == "27.5.7a32.dev1"
+    assert "classifier_version" not in row
     assert out["has_prev"] is False
     assert out["has_next"] is True
     assert out["next"] == 2

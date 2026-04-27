@@ -34,7 +34,15 @@ def _format_name(raw: str) -> str:
 
 
 def tidy_classifiers(raw: Any, survey: str) -> list[dict[str, Any]]:
-    """Dedupe by classifier_name, collect classes, sort by priority."""
+    """Dedupe by classifier_name, collect classes + versions, sort by priority.
+
+    Each entry carries a `versions` list (in the order returned by the API)
+    and a `latest_version` (lexicographic max). The latest is what the
+    "Latest" option in the version dropdown sends to the upstream API; we
+    pick lex-max because the version strings in production are mostly
+    "N.N.N"-shaped, where lex order tracks chronology closely enough for
+    a UI default. "Any" lets the user opt out by sending nothing.
+    """
     rows = raw if isinstance(raw, list) else raw.get("classifiers", [])
     priorities = _PRIORITY.get(survey, {})
 
@@ -44,12 +52,15 @@ def tidy_classifiers(raw: Any, survey: str) -> list[dict[str, Any]]:
         if not name:
             continue
         classes = row.get("classes") or []
+        version = row.get("classifier_version")
         entry = by_name.setdefault(
             name,
             {
                 "classifier_name": name,
                 "formatted_name": _format_name(name),
                 "classes": [],
+                "versions": [],
+                "latest_version": None,
             },
         )
         # Merge class lists across versions, preserving order, no dupes.
@@ -58,6 +69,11 @@ def tidy_classifiers(raw: Any, survey: str) -> list[dict[str, Any]]:
             if c not in seen:
                 entry["classes"].append(c)
                 seen.add(c)
+        if version and version not in entry["versions"]:
+            entry["versions"].append(version)
+
+    for entry in by_name.values():
+        entry["latest_version"] = max(entry["versions"]) if entry["versions"] else None
 
     result = list(by_name.values())
     result.sort(key=lambda e: priorities.get(e["classifier_name"], 999))

@@ -28,7 +28,7 @@
         <li><strong class="tw-text-text-primary">Overlay</strong> — parametric model fit from the latest feature-extractor version (SPM, FLEET, or TDE tail), when available</li>
       </ul>
     {% endcall %}
-    <div class="tw-flex tw-items-center tw-gap-3">
+    <div class="tw-flex tw-items-center tw-gap-1.5 tw-flex-wrap tw-justify-end">
       {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
         {#
           Diff/Sci and Flux/Mag toggles are both pure client-side projections:
@@ -45,7 +45,7 @@
         {% if lc.has_science_flux %}
           <button
             type="button"
-            class="lc-source-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+            class="lc-source-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
             data-target="lc-canvas-{{ oid }}"
             data-lc-source="diff"
             title="Click to toggle Diff ↔ Sci flux. Difference flux is from the subtracted image; science flux is the total on the science image (when a reference source exists)."
@@ -53,42 +53,48 @@
         {% endif %}
         <button
           type="button"
-          class="lc-mode-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+          class="lc-mode-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
           data-target="lc-canvas-{{ oid }}"
           data-lc-mode="flux"
           title="Click to toggle linear flux (nJy) ↔ AB magnitude (ZP 31.4, reversed axis)."
         >Flux</button>
         <button
           type="button"
-          class="lc-abs-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+          class="lc-abs-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
           data-target="lc-canvas-{{ oid }}"
           data-lc-abs="app"
           title="Click to toggle Apparent ↔ Absolute (rest-frame @10 pc, via Planck-2018 distance modulus). Requires positive z."
         >App</button>
         <label
-          class="tw-inline-flex tw-items-center tw-gap-1 tw-text-xs tw-text-text-muted"
-          title="Host-galaxy spectroscopic redshift. Click a source in the sky view to populate this from a VizieR catalog, or type one in."
+          class="tw-inline-flex tw-items-center tw-gap-1 tw-text-[11px] tw-text-text-muted"
+          title="Spectroscopic redshift. Pre-filled from a TNS report when one exists for this position; otherwise empty until you click a host in the sky view or type a value in. Never inherited from the URL or a previous object."
         >
           z
+          {#
+            `value` is the only place a redshift gets pre-filled server-side
+            — restricted to a TNS-reported z so we don't silently assume
+            redshifts that haven't been confirmed for this object.
+          #}
           <input
             id="lc-redshift-{{ oid }}"
             type="number"
             step="any"
             min="0"
             placeholder="z"
+            {% if tns_z is not none and tns_z > 0 %}value="{{ tns_z }}"{% endif %}
             data-target="lc-canvas-{{ oid }}"
-            class="lc-redshift-input tw-w-20 tw-px-1.5 tw-py-0.5 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+            class="lc-redshift-input tw-w-[60px] tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
           />
         </label>
         <button
           type="button"
-          class="lc-dered-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+          class="lc-dered-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
           data-target="lc-canvas-{{ oid }}"
           data-lc-dered="obs"
           title="Click to toggle Observed ↔ Dereddened (Fitzpatrick 1999 Milky-Way extinction, A_λ = R_λ × E(B-V) per band). Requires a positive E(B-V)."
         >Obs</button>
         <label
-          class="tw-inline-flex tw-items-center tw-gap-1 tw-text-xs tw-text-text-muted"
+          class="tw-inline-flex tw-items-center tw-gap-1 tw-text-[11px] tw-text-text-muted"
           title="Milky-Way E(B-V) from the IRSA dust proxy (SF11 preferred, SFD98 fallback), cached per RA/Dec rounded to 0.01°. Leave empty for auto, or type in to override."
         >
           E(B-V)
@@ -99,7 +105,7 @@
             min="0"
             placeholder="auto"
             data-target="lc-canvas-{{ oid }}"
-            class="lc-ebv-input tw-w-20 tw-px-1.5 tw-py-0.5 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+            class="lc-ebv-input tw-w-14 tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
           />
         </label>
         {#
@@ -114,7 +120,7 @@
           <div class="tw-inline-flex tw-items-center tw-gap-1">
             <button
               type="button"
-              class="lc-dr-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-text-text-primary"
+              class="lc-dr-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-text-text-primary"
               data-target="lc-canvas-{{ oid }}"
               data-ra="{{ ra }}"
               data-dec="{{ dec }}"
@@ -149,7 +155,7 @@
         {% if lc.multiband_period and lc.multiband_period > 0 %}
           <button
             type="button"
-            class="lc-fold-toggle tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-bg-bg-tertiary"
+            class="lc-fold-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-bg-bg-tertiary"
             data-target="lc-canvas-{{ oid }}"
             data-lc-fold="off"
             data-lc-period="{{ lc.multiband_period }}"
@@ -164,13 +170,13 @@
         #}
         {% if lc.parametric_fits %}
           <label
-            class="tw-inline-flex tw-items-center tw-gap-1 tw-text-xs tw-text-text-muted"
+            class="tw-inline-flex tw-items-center tw-gap-1 tw-text-[11px] tw-text-text-muted"
             title="Overlay a parametric model fit (from the latest feature-extractor version) on top of the light curve. SPM is the Sánchez-Sáez+2021 stochastic-parametric model; FLEET and TDE-tail are the ALeRCE transient-tail models."
           >
             Overlay
             <select
               id="lc-overlay-{{ oid }}"
-              class="lc-overlay-select tw-px-1.5 tw-py-0.5 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary"
+              class="lc-overlay-select tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary"
               data-target="lc-canvas-{{ oid }}"
               data-lc-overlay="none"
             >
@@ -183,10 +189,26 @@
         {% endif %}
         <button
           type="button"
-          class="chart-zoom-reset-btn tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
+          class="chart-zoom-reset-btn tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
           data-target="lc-canvas-{{ oid }}"
           title="Reset the light-curve zoom (same as double-clicking the chart)."
         >Reset zoom</button>
+        {#
+          CSV export. Emits every projection as its own column — the full
+          Flux/Mag × Diff/Sci × App/Abs × Obs/Der cross-product, plus the
+          error alongside each. `*_abs` columns stay empty when z isn't
+          set; `*_der` columns stay empty when E(B-V) isn't set, so
+          consumers can tell missing-state from zero-correction. Fold is a
+          display transform; rows always carry MJD, and the period lands
+          in the metadata header.
+        #}
+        <button
+          type="button"
+          class="lc-download-btn tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
+          data-target="lc-canvas-{{ oid }}"
+          data-oid="{{ oid }}"
+          title="Download all 16 Flux/Mag × Diff/Sci × App/Abs × Obs/Der projections (+ errors) as CSV. Fold is display-only: rows are always MJD."
+        >Download</button>
       {% endif %}
     </div>
   </div>

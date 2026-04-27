@@ -4,10 +4,82 @@
 <div class="tw-flex tw-flex-col tw-h-full">
 
   <header class="tw-h-12 tw-bg-bg-secondary tw-border-b tw-border-border tw-flex tw-items-center tw-px-4 tw-gap-3">
-    <div class="tw-text-accent tw-font-bold tw-text-sm">
-      ALeRCE <span class="tw-text-text-secondary tw-font-normal tw-text-xs">tutorial · htmx</span>
+    {#
+      Brand link. Plain `<a href="/">` does a full-page reload to the
+      empty home: the form re-fetches its defaults via /htmx/search_objects
+      and the results slot falls back to the empty-hint template, so any
+      filters / pagination / detail state are wiped — the simplest "reset
+      everything" gesture without us having to mirror the reset logic in
+      JS. Logo SVG is the ALeRCE eagle from the prototype, white-fill so it
+      reads on the dark header.
+    #}
+    <a
+      href="/"
+      class="tw-flex tw-items-center tw-gap-2 tw-text-accent tw-font-bold tw-text-sm tw-flex-none hover:tw-text-text-primary"
+      title="Back to home (clears all filters)"
+      aria-label="ALeRCE Explorer — back to home"
+    >
+      <img
+        src="/static/img/alerce-logo.svg"
+        alt=""
+        class="tw-h-[34px] tw-w-[34px] tw-flex-none"
+      />
+      <span>ALeRCE <span class="tw-text-text-secondary tw-font-normal tw-text-xs">tutorial · htmx</span></span>
+    </a>
+    {#
+      Detail-only nav row, lifted into the global header so the detail
+      panels reclaim the row below for actual data. Hidden on the listing
+      and any other empty state — `object_nav.js::updateButtons` toggles
+      `tw-hidden` ↔ `tw-flex` based on whether a detail is on screen
+      (`#object-detail` carries the current OID). The back button targets
+      `backToResults()` (helpers.js, URL-derived) and the prev/next arrows
+      target `navObject(...)` (object_nav.js).
+    #}
+    <div
+      id="detail-nav-bar"
+      class="tw-hidden tw-items-center tw-gap-2 tw-flex-1 tw-min-w-0"
+    >
+      <button
+        type="button"
+        class="tw-px-3 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded tw-flex-none"
+        onclick="backToResults()"
+      >← Back to results</button>
+      {#
+        Page-of-OIDs dot row — populated by object_nav.js from
+        window._resultsNav. Each OID becomes a 9×9 dot: filled accent for
+        the current OID, hollow ring for the rest. `justify-between` lets
+        the row grow into the header's free space; `flex-1` claims that
+        space from the surrounding controls.
+      #}
+      <div
+        id="object-nav-list"
+        class="tw-flex tw-items-center tw-justify-between tw-gap-1 tw-min-w-0 tw-flex-1 tw-px-2 tw-whitespace-nowrap"
+      ></div>
+      {#
+        Prev/next arrows + position indicator. Hidden by default; the JS
+        reveals them iff a results-page nav state exists, so a deep-link
+        without context just shows the back button + dots (which will
+        also be empty without nav state).
+      #}
+      <div id="object-nav" class="tw-hidden tw-items-center tw-gap-2 tw-flex-none">
+        <button
+          type="button"
+          id="object-nav-prev"
+          class="tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
+          title="Previous object (←)"
+          onclick="navObject('prev')"
+        >←</button>
+        <span id="object-nav-position" class="tw-text-xs tw-text-text-muted mono"></span>
+        <button
+          type="button"
+          id="object-nav-next"
+          class="tw-px-2 tw-py-1 tw-text-sm tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded disabled:tw-opacity-30 disabled:tw-cursor-not-allowed"
+          title="Next object (→)"
+          onclick="navObject('next')"
+        >→</button>
+      </div>
     </div>
-    <div class="tw-ml-auto tw-text-xs tw-text-text-muted">Slice 1 scaffold</div>
+    <div class="tw-ml-auto tw-text-xs tw-text-text-muted tw-flex-none">Slice 1 scaffold</div>
   </header>
 
   <div class="tw-flex tw-flex-1 tw-min-h-0">
@@ -21,10 +93,14 @@
     #}
     {%- set filter_qs %}
       {%- if initial_classifier %}&classifier={{ initial_classifier|urlencode }}{% endif %}
+      {%- if initial_classifier_version %}&classifier_version={{ initial_classifier_version|urlencode }}{% endif %}
       {%- if initial_class_name %}&class_name={{ initial_class_name|urlencode }}{% endif %}
       {%- if initial_probability and initial_probability > 0 %}&probability={{ initial_probability }}{% endif %}
       {%- if initial_n_det_min is not none %}&n_det_min={{ initial_n_det_min }}{% endif %}
       {%- if initial_n_det_max is not none %}&n_det_max={{ initial_n_det_max }}{% endif %}
+      {%- if initial_firstmjd_min is not none %}&firstmjd_min={{ initial_firstmjd_min }}{% endif %}
+      {%- if initial_firstmjd_max is not none %}&firstmjd_max={{ initial_firstmjd_max }}{% endif %}
+      {%- if initial_ra is not none and initial_dec is not none %}&ra={{ initial_ra }}&dec={{ initial_dec }}{% if initial_radius is not none %}&radius={{ initial_radius }}{% endif %}{% endif %}
       {%- if initial_oids %}&oids={{ initial_oids|urlencode }}{% endif %}
       {%- if initial_page and initial_page > 1 %}&page={{ initial_page }}{% endif %}
     {%- endset %}
@@ -67,7 +143,7 @@
           hx-trigger="load"
           hx-swap="innerHTML"
         ></div>
-      {% elif initial_classifier or initial_class_name or initial_probability or initial_n_det_min is not none or initial_n_det_max is not none or initial_oids or initial_page %}
+      {% elif initial_classifier or initial_classifier_version or initial_class_name or initial_probability or initial_n_det_min is not none or initial_n_det_max is not none or initial_firstmjd_min is not none or initial_firstmjd_max is not none or (initial_ra is not none and initial_dec is not none) or initial_oids or initial_page %}
         <div
           id="results-slot"
           hx-get="{{ API_URL }}/htmx/list_objects?survey={{ initial_survey }}{{ filter_qs|trim }}"

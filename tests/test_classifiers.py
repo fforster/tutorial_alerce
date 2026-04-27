@@ -12,6 +12,32 @@ def test_tidy_dedupes_by_name_and_merges_classes():
     assert len(out) == 1
     assert out[0]["classifier_name"] == "lc_classifier"
     assert out[0]["classes"] == ["SN", "AGN", "VS"]
+    # Versions are collected in input order; latest is the lex-max so the
+    # "Latest" dropdown option resolves to the same string regardless of
+    # ordering quirks upstream.
+    assert out[0]["versions"] == ["v1", "v2"]
+    assert out[0]["latest_version"] == "v2"
+
+
+def test_tidy_latest_version_is_lex_max():
+    """Lex-max picks the highest version in N.N.N space — works for the
+    versions actually returned by ALeRCE in practice (e.g. 1.0.0 < 1.0.4)."""
+    raw = [
+        {"classifier_name": "stamp_classifier", "classifier_version": "1.0.4",
+         "classes": ["bogus"]},
+        {"classifier_name": "stamp_classifier", "classifier_version": "1.0.0",
+         "classes": ["bogus"]},
+    ]
+    out = tidy_classifiers(raw, "ztf")
+    assert out[0]["latest_version"] == "1.0.4"
+    assert set(out[0]["versions"]) == {"1.0.0", "1.0.4"}
+
+
+def test_tidy_no_version_field_yields_none_latest():
+    raw = [{"classifier_name": "lc_classifier_top", "classes": []}]
+    out = tidy_classifiers(raw, "lsst")
+    assert out[0]["versions"] == []
+    assert out[0]["latest_version"] is None
 
 
 def test_tidy_sorts_by_priority():

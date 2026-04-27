@@ -6,17 +6,27 @@
   <div class="tw-mb-3">
     {% from "_panel_help.html.jinja" import panel_help %}
     {% call panel_help("Basic Information") %}
-      <div class="tw-font-semibold tw-mb-1">What's shown</div>
+      <div class="tw-font-semibold tw-mb-1">Fields</div>
       <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
-        <li><strong class="tw-text-text-primary">RA / Dec</strong> — mean position in decimal degrees and HMS/DMS</li>
-        <li><strong class="tw-text-text-primary">Eq ↔ Gal ↔ Ecl</strong> — cycle the coordinate row between Equatorial (RA/Dec), Galactic (l, b), and J2000 Ecliptic (λ, β); HMS/Deg applies only to Equatorial</li>
+        <li><strong class="tw-text-text-primary">RA / Dec</strong> — mean object position</li>
         <li><strong class="tw-text-text-primary">First / Last MJD</strong> — time span of detections (Δ MJD is the extent)</li>
         <li><strong class="tw-text-text-primary">N det / N non-det</strong> — detection and non-detection counts</li>
         <li><strong class="tw-text-text-primary">N forced</strong> — LSST forced-photometry count (when available)</li>
         <li><strong class="tw-text-text-primary">Corrected / Stellar</strong> — ZTF only: whether host-galaxy correction was applied, and a stellarity flag</li>
       </ul>
-      <div class="tw-font-semibold tw-mb-1">Other archives ▾</div>
-      <p class="tw-text-text-secondary">Dropdown (at the bottom of the panel) with links to external catalogs and services (ALeRCE, NED, SIMBAD, TNS, etc.) pre-populated with this object's coordinates.</p>
+      <div class="tw-font-semibold tw-mb-1">Coord controls</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">⇄ (left of RA / Dec)</strong> — cycles both rows through Equatorial (RA, Dec), Galactic (ℓ, b), and J2000 Ecliptic (λ, β); the two buttons are synchronized, and labels update so the current system is always readable</li>
+        <li><strong class="tw-text-text-primary">HMS / Deg</strong> — switches RA/Dec between decimal degrees and sexagesimal; Equatorial only</li>
+        <li><strong class="tw-text-text-primary">Copy</strong> — copies the currently-displayed pair to the clipboard (✓ / ✗ flashes next to the button)</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">TNS</div>
+      <p class="tw-text-text-secondary tw-mb-3">When a Transient Name Server object matches the cone-search on this object's position, the panel shows its TNS class, name, and reported redshift. Follow the name/TNS link for discovery and classification reporters. (Sourced via ALeRCE's TNS bridge.)</p>
+      <div class="tw-font-semibold tw-mb-1">Actions</div>
+      <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">Show features</strong> — opens the full ALeRCE feature table for this object (ZTF only; LSST has no features endpoint yet)</li>
+        <li><strong class="tw-text-text-primary">Other archives ▾</strong> — links to external catalogs and services (ALeRCE, NED, SIMBAD, TNS, …) pre-populated with this object's coordinates</li>
+      </ul>
     {% endcall %}
     <div class="mono tw-text-base tw-mt-1">{{ info.oid }}</div>
     <div class="tw-text-text-muted tw-text-xs tw-mt-1">Survey: {{ survey_id }}</div>
@@ -44,7 +54,25 @@
       on the dd so the value can span into the now-empty controls column.
     #}
     <dl class="tw-grid tw-grid-cols-[auto_auto_auto] tw-gap-x-2 tw-gap-y-1 tw-text-xs tw-items-center">
-      <dt class="tw-text-text-secondary coord-label" data-axis="ra">RA</dt>
+      {#
+        A small ⇄ icon-button to the left of each coord label cycles the
+        system (Eq → Gal → Ecl). Both rows carry the icon so the click
+        target is always adjacent to whichever label the user's eye is on;
+        shared state on `data-coord-system` keeps the two buttons
+        synchronized — clicking either advances both rows in lockstep. The
+        labels themselves stay plain text so the user can *read* the current
+        system after clicking, rather than watching their click target
+        change out from under them.
+      #}
+      <dt class="tw-flex tw-items-center tw-gap-1">
+        <button
+          type="button"
+          class="coord-system-toggle tw-px-1 tw-text-[10px] tw-leading-none tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+          aria-label="Cycle coordinate system (Equatorial, Galactic, Ecliptic)"
+          title="Cycle coord system: RA/Dec ↔ ℓ/b ↔ λ/β"
+        >⇄</button>
+        <span class="coord-label tw-text-text-secondary" data-axis="ra">RA</span>
+      </dt>
       <dd class="mono coord-value"
           data-axis="ra"
           data-deg="{% if info.ra is not none %}{{ '%.5f'|format(info.ra) }}{% endif %}"
@@ -65,7 +93,15 @@
       <span></span>
       {% endif %}
 
-      <dt class="tw-text-text-secondary coord-label" data-axis="dec">Dec</dt>
+      <dt class="tw-flex tw-items-center tw-gap-1">
+        <button
+          type="button"
+          class="coord-system-toggle tw-px-1 tw-text-[10px] tw-leading-none tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+          aria-label="Cycle coordinate system (Equatorial, Galactic, Ecliptic)"
+          title="Cycle coord system: RA/Dec ↔ ℓ/b ↔ λ/β"
+        >⇄</button>
+        <span class="coord-label tw-text-text-secondary" data-axis="dec">Dec</span>
+      </dt>
       <dd class="mono coord-value"
           data-axis="dec"
           data-deg="{% if info.dec is not none %}{{ '%.5f'|format(info.dec) }}{% endif %}"
@@ -130,24 +166,39 @@
   </div>
 
   {#
-    Bottom action row: coord-system cycler + Show features + Other archives.
-    Kept together at the bottom so the header (OID + help button) stays
-    clean. Rendered if any of the three controls is relevant: ra/dec for the
-    coord-system cycler, `has_features` for Show features (LSST doesn't
-    publish features yet), and non-empty `info.archives` for the dropdown.
+    TNS classification strip. Sourced from the ALeRCE htmx bridge
+    (api.alerce.online/.../htmx/tns/?ra&dec). Rendered only when a TNS
+    object matches the cone search — otherwise the row disappears entirely
+    rather than showing "no TNS match" noise. Fields mirror what the bridge
+    exposes: type (class), name, redshift; "Provided by TNS" link goes to
+    the TNS object page, which is where the discovery + classification
+    reporters live (the htmx bridge doesn't surface reporter names).
   #}
-  {% set has_coords = info.ra is not none and info.dec is not none %}
-  {% if has_coords or has_features or info.archives %}
+  {#
+    One-line TNS strip: label + Class · Name · z, with a small "via TNS" link
+    at the end. `flex-wrap` lets the row break onto a second line on narrow
+    panels instead of overflowing. Fields missing upstream are skipped
+    entirely (no "—" placeholder) so the row stays tight.
+  #}
+  {% if tns %}
+  <div class="tns-block tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-text-xs tw-flex tw-items-baseline tw-gap-x-2 tw-gap-y-1 tw-flex-wrap">
+    <span class="tw-text-text-secondary tw-uppercase">TNS</span>
+    {% if tns.type %}<span class="mono">{{ tns.type }}</span>{% endif %}
+    <a href="{{ tns.url }}" target="_blank" rel="noopener"
+       class="mono tw-text-accent hover:tw-text-text-primary tw-underline tw-decoration-dotted"
+       title="Open TNS object page (discovery / classification reporters)">{{ tns.name }}</a>
+    {% if tns.redshift is not none %}<span class="mono"><span class="tw-text-text-secondary">z</span> {{ "%.4f"|format(tns.redshift) }}</span>{% endif %}
+  </div>
+  {% endif %}
+
+  {#
+    Bottom action row: Show features + Other archives. The coord-system
+    cycler used to live here as an "Eq" button — it's now folded into the
+    RA/Dec labels above, so the row only renders when features or archives
+    are relevant.
+  #}
+  {% if has_features or info.archives %}
     <div class="tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-flex tw-items-center tw-gap-2 tw-flex-wrap">
-      {% if has_coords %}
-      <button
-        type="button"
-        class="coord-system-toggle tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
-        data-system="eq"
-        title="Cycle the coordinate row between Equatorial (RA/Dec), Galactic (l, b), and J2000 Ecliptic (λ, β)."
-        aria-label="Cycle coordinate system"
-      >Eq</button>
-      {% endif %}
       {% if has_features %}
       {#
         hx-indicator="#features-loading" reveals the spinner next to the
@@ -213,24 +264,27 @@
   const root = document.getElementById("basic-info");
   if (!root) return;
   const toggle = root.querySelector(".coord-format-toggle");
-  const systemToggle = root.querySelector(".coord-system-toggle");
+  const systemToggles = root.querySelectorAll(".coord-system-toggle");
   const copyBtn = root.querySelector(".coord-copy-btn");
   const msg = root.querySelector(".coord-copy-msg");
   const values = root.querySelectorAll(".coord-value");
   const labels = root.querySelectorAll(".coord-label");
   if (!values.length) return;
 
-  // Labels per system + axis. The label column swaps RA/Dec ↔ l/b ↔ λ/β so
-  // the row stays self-documenting when the system changes.
+  // Labels per system + axis. The label column swaps RA/Dec ↔ ℓ/b ↔ λ/β so
+  // the row stays self-documenting when the system changes; the dedicated ⇄
+  // button is the click target, so the label text itself is always readable.
   const SYSTEM_LABELS = {
-    eq:  { ra: "RA",  dec: "Dec", btn: "Eq"  },
-    gal: { ra: "l",   dec: "b",   btn: "Gal" },
-    ecl: { ra: "λ",   dec: "β",   btn: "Ecl" },
+    eq:  { ra: "RA", dec: "Dec" },
+    gal: { ra: "ℓ",  dec: "b"   },
+    ecl: { ra: "λ",  dec: "β"   },
   };
   const SYSTEM_CYCLE = ["eq", "gal", "ecl"];
 
   function currentSystem() {
-    return systemToggle ? systemToggle.dataset.system : "eq";
+    // State lives on the panel root so both label buttons read/write the
+    // same value — click either one and both update.
+    return root.dataset.coordSystem || "eq";
   }
 
   function currentFormat() {
@@ -260,14 +314,13 @@
       // unclickable + invisible so users aren't tempted to click a no-op.
       // `visibility: hidden` (not `display: none`) keeps the grid cell so
       // the <dt>/<dd> on the Dec row don't bubble up into the empty slot,
-      // which would shuffle "l / 57.79 / b / -42.76" onto two lines.
+      // which would shuffle "ℓ / 57.79 / b / -42.76" onto two lines.
       const hide = system !== "eq";
       toggle.style.visibility = hide ? "hidden" : "";
       toggle.disabled = hide;
       toggle.textContent = format === "deg" ? "HMS" : "Deg";
       toggle.setAttribute("aria-pressed", format === "sex" ? "true" : "false");
     }
-    if (systemToggle) systemToggle.textContent = SYSTEM_LABELS[system].btn;
   }
 
   if (toggle) {
@@ -276,13 +329,16 @@
       apply();
     });
   }
-  if (systemToggle) {
-    systemToggle.addEventListener("click", () => {
+  // Both ⇄ buttons share state on `root.dataset.coordSystem`, so binding the
+  // same handler to each keeps them synchronized — clicking either cycles
+  // both rows together.
+  systemToggles.forEach((btn) => {
+    btn.addEventListener("click", () => {
       const idx = SYSTEM_CYCLE.indexOf(currentSystem());
-      systemToggle.dataset.system = SYSTEM_CYCLE[(idx + 1) % SYSTEM_CYCLE.length];
+      root.dataset.coordSystem = SYSTEM_CYCLE[(idx + 1) % SYSTEM_CYCLE.length];
       apply();
     });
-  }
+  });
   apply();
 
   if (copyBtn) {

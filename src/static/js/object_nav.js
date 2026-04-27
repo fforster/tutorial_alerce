@@ -84,60 +84,46 @@
       btn.type = "button";
       btn.dataset.oid = o;
       const active = String(o) === String(currentOid);
-      // Active chip gets accent border + filled background; inactive chips
-      // are muted and pick up the accent on hover.
-      // Font size is driven by the parent (scaled to fit in fitOidListFont);
-      // per-chip classes only carry padding, border, and active-state colors.
-      btn.className = active
-        ? "tw-px-1 tw-py-0 tw-rounded tw-border tw-border-accent tw-bg-accent/20 tw-text-text-primary tw-leading-tight tw-flex-none"
-        : "tw-px-1 tw-py-0 tw-rounded tw-border tw-border-border tw-text-text-muted tw-leading-tight hover:tw-text-text-primary hover:tw-border-accent tw-flex-none";
-      btn.textContent = o;
+      // Each candidate is a 9×9 dot with a 1px translucent accent ring.
+      // The active OID is filled (also translucent) while the rest stay
+      // transparent so the page background shows through — "filled vs
+      // hollow" reads at a glance without the row competing with the
+      // adjacent buttons for attention. Hover bumps the alpha so the
+      // pointer target is still obvious. OID rides on `title` (native
+      // tooltip) + `aria-label` (screen readers) since the dot has no
+      // visible text.
+      btn.className =
+        "tw-w-[9px] tw-h-[9px] tw-rounded-full tw-border tw-border-accent/50 tw-flex-none tw-transition-colors "
+        + (active ? "tw-bg-accent/60" : "tw-bg-transparent hover:tw-bg-accent/25");
       btn.title = o;
+      btn.setAttribute("aria-label", `Open ${o}`);
       frag.appendChild(btn);
     });
     list.appendChild(frag);
-    fitOidListFont(list);
-    observeOidListWidth();
-  }
-
-  // Shrink the container's font-size until all chips fit in one row (no
-  // scroll). Baseline is 12px; floor is 6px so text stays legible. Uses
-  // scrollWidth/clientWidth, so the measurement is real-DOM accurate.
-  function fitOidListFont(list) {
-    const MAX_PX = 12;
-    const MIN_PX = 6;
-    list.style.fontSize = MAX_PX + "px";
-    // One reflow-inducing read is enough — if it fits at max, we're done.
-    if (list.scrollWidth <= list.clientWidth + 1) return;
-    const ratio = list.clientWidth / list.scrollWidth;
-    const px = Math.max(MIN_PX, Math.floor(MAX_PX * ratio * 0.98));
-    list.style.fontSize = px + "px";
-  }
-
-  // Re-fit when the container's own width changes — catches both window
-  // resize and sidebar toggle (which doesn't trigger a window resize event).
-  // Installed once per list element to survive htmx swaps.
-  function observeOidListWidth() {
-    const list = document.getElementById("object-nav-list");
-    if (!list || list.$roObserved) return;
-    list.$roObserved = true;
-    if (typeof ResizeObserver === "undefined") return;
-    let timer = null;
-    new ResizeObserver(() => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (list.children.length) fitOidListFont(list);
-      }, 50);
-    }).observe(list);
   }
 
   function updateButtons() {
     const wrap = document.getElementById("object-nav");
-    if (!wrap) return;
+    const bar = document.getElementById("detail-nav-bar");
     const nav = window._resultsNav;
     const oid = currentDetailOid();
     const posEl = document.getElementById("object-nav-position");
+    // The whole nav row in the header tracks "is a detail on screen". When
+    // the user is on the listing or a fresh `/`, the bar collapses so the
+    // header reads as just the title. Independent of `nav` so a deep-link
+    // without results-page context still shows the back button + (empty)
+    // dots row.
+    if (bar) {
+      if (oid) {
+        bar.classList.remove("tw-hidden");
+        bar.classList.add("tw-flex");
+      } else {
+        bar.classList.add("tw-hidden");
+        bar.classList.remove("tw-flex");
+      }
+    }
     renderOidList(nav, oid);
+    if (!wrap) return;
     if (!nav || !nav.oids || !nav.oids.length || !oid) {
       wrap.classList.add("tw-hidden");
       wrap.classList.remove("tw-flex");

@@ -10,10 +10,14 @@
 #}
 {%- set filter_qs %}
   {%- if classifier %}&classifier={{ classifier|urlencode }}{% endif %}
+  {%- if classifier_version %}&classifier_version={{ classifier_version|urlencode }}{% endif %}
   {%- if class_name %}&class_name={{ class_name|urlencode }}{% endif %}
   {%- if probability and probability > 0 %}&probability={{ probability }}{% endif %}
   {%- if n_det_min is not none %}&n_det_min={{ n_det_min }}{% endif %}
   {%- if n_det_max is not none %}&n_det_max={{ n_det_max }}{% endif %}
+  {%- if firstmjd_min is not none %}&firstmjd_min={{ firstmjd_min }}{% endif %}
+  {%- if firstmjd_max is not none %}&firstmjd_max={{ firstmjd_max }}{% endif %}
+  {%- if ra is not none and dec is not none %}&ra={{ ra }}&dec={{ dec }}{% if radius is not none %}&radius={{ radius }}{% endif %}{% endif %}
   {%- if oids %}&oids={{ oids|urlencode }}{% endif %}
   {%- if page and page > 1 %}&page={{ page }}{% endif %}
 {%- endset %}

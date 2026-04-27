@@ -26,6 +26,7 @@ from ..services import object_info as object_info_service
 from ..services import object_list as object_list_service
 from ..services import probability as probability_service
 from ..services import stamps as stamps_service
+from ..services import tns as tns_service
 from ..services.survey_config import SC, known_surveys
 
 log = logging.getLogger(__name__)
@@ -51,11 +52,17 @@ def _share_url(
     survey: str | None,
     oid: str | None = None,
     classifier: str | None = None,
+    classifier_version: str | None = None,
     identifier: str | None = None,
     class_name: str | None = None,
     probability: float | None = None,
     n_det_min: int | None = None,
     n_det_max: int | None = None,
+    firstmjd_min: float | None = None,
+    firstmjd_max: float | None = None,
+    ra: float | None = None,
+    dec: float | None = None,
+    radius: float | None = None,
     oids: str | None = None,
     page: int | None = None,
 ) -> str:
@@ -79,6 +86,8 @@ def _share_url(
         params.append(("oid", oid))
     if classifier:
         params.append(("classifier", classifier))
+    if classifier_version:
+        params.append(("classifier_version", classifier_version))
     if class_name:
         params.append(("class_name", class_name))
     if probability is not None and probability > 0:
@@ -87,6 +96,20 @@ def _share_url(
         params.append(("n_det_min", str(n_det_min)))
     if n_det_max is not None:
         params.append(("n_det_max", str(n_det_max)))
+    # Discovery-date range (MJD): persisted as plain floats so the form
+    # input round-trips cleanly. The client parses any input format into
+    # MJD before submitting, so the URL form is always numeric.
+    if firstmjd_min is not None:
+        params.append(("firstmjd_min", str(firstmjd_min)))
+    if firstmjd_max is not None:
+        params.append(("firstmjd_max", str(firstmjd_max)))
+    # Conesearch — only meaningful when ra+dec are both present; radius
+    # rides along but defaults upstream when omitted.
+    if ra is not None and dec is not None:
+        params.append(("ra", str(ra)))
+        params.append(("dec", str(dec)))
+        if radius is not None:
+            params.append(("radius", str(radius)))
     if oids:
         params.append(("oids", oids))
     if page is not None and page > 1:
@@ -102,20 +125,27 @@ async def index(
     survey: str | None = None,
     oid: str | None = None,
     classifier: str | None = None,
+    classifier_version: str | None = None,
     identifier: str | None = None,
     class_name: str | None = None,
     probability: float | None = None,
     n_det_min: int | None = None,
     n_det_max: int | None = None,
+    firstmjd_min: float | None = None,
+    firstmjd_max: float | None = None,
+    ra: float | None = None,
+    dec: float | None = None,
+    radius: float | None = None,
     oids: str | None = None,
     page: int | None = None,
 ) -> HTMLResponse:
     # Query params hydrate the initial view: `?oid=…` jumps straight to the
     # detail, filter params (`classifier`, `class_name`, `probability`,
-    # `n_det_min/max`, `oids`, `page`) pre-populate the search form and — when
-    # no `oid=` is set — pre-run the listing with that filter set. `identifier`
-    # pre-selects a specific detection in the stamps/highlight panels. Fresh
-    # `/` keeps the empty-hint default.
+    # `n_det_min/max`, `firstmjd_min/max`, `ra`/`dec`/`radius`, `oids`,
+    # `page`) pre-populate the search form and — when no `oid=` is set —
+    # pre-run the listing with that filter set. `identifier` pre-selects a
+    # specific detection in the stamps/highlight panels. Fresh `/` keeps
+    # the empty-hint default.
     if survey:
         _validate_survey(survey)
     return templates.TemplateResponse(
@@ -125,11 +155,17 @@ async def index(
             "initial_survey": survey or "lsst",
             "initial_oid": oid,
             "initial_classifier": classifier,
+            "initial_classifier_version": classifier_version,
             "initial_identifier": identifier,
             "initial_class_name": class_name,
             "initial_probability": probability,
             "initial_n_det_min": n_det_min,
             "initial_n_det_max": n_det_max,
+            "initial_firstmjd_min": firstmjd_min,
+            "initial_firstmjd_max": firstmjd_max,
+            "initial_ra": ra,
+            "initial_dec": dec,
+            "initial_radius": radius,
             "initial_oids": oids,
             "initial_page": page,
         },
@@ -141,10 +177,16 @@ async def search_form(
     request: Request,
     survey: str = "lsst",
     classifier: str | None = None,
+    classifier_version: str | None = None,
     class_name: str | None = None,
     probability: float | None = None,
     n_det_min: int | None = None,
     n_det_max: int | None = None,
+    firstmjd_min: float | None = None,
+    firstmjd_max: float | None = None,
+    ra: float | None = None,
+    dec: float | None = None,
+    radius: float | None = None,
     oids: str | None = None,
 ) -> HTMLResponse:
     _validate_survey(survey)
@@ -160,10 +202,16 @@ async def search_form(
             "survey": survey,
             "classifiers": tidy,
             "selected_classifier": classifier,
+            "selected_classifier_version": classifier_version,
             "selected_class_name": class_name,
             "selected_probability": probability,
             "selected_n_det_min": n_det_min,
             "selected_n_det_max": n_det_max,
+            "selected_firstmjd_min": firstmjd_min,
+            "selected_firstmjd_max": firstmjd_max,
+            "selected_ra": ra,
+            "selected_dec": dec,
+            "selected_radius": radius,
             "selected_oids": oids,
         },
     )
@@ -186,10 +234,16 @@ async def list_objects(
     request: Request,
     survey: str | None = None,
     classifier: str | None = None,
+    classifier_version: str | None = None,
     class_name: str | None = None,
     probability: float | None = None,
     n_det_min: int | None = None,
     n_det_max: int | None = None,
+    firstmjd_min: float | None = None,
+    firstmjd_max: float | None = None,
+    ra: float | None = None,
+    dec: float | None = None,
+    radius: float | None = None,
     oids: str | None = None,
     page: int = 1,
     page_size: int = object_list_service.DEFAULT_PAGE_SIZE,
@@ -211,10 +265,16 @@ async def list_objects(
         data = await object_list_service.get_objects_list(
             survey=survey,
             classifier=classifier,
+            classifier_version=classifier_version,
             class_name=class_name,
             probability=probability,
             n_det_min=n_det_min,
             n_det_max=n_det_max,
+            firstmjd_min=firstmjd_min,
+            firstmjd_max=firstmjd_max,
+            ra=ra,
+            dec=dec,
+            radius=radius,
             oid=oids,  # service still uses `oid=` internally for the OID-list filter
             page=max(page, 1),
             page_size=page_size,
@@ -234,10 +294,16 @@ async def list_objects(
             "objects_list": data,
             "survey": survey,
             "classifier": classifier,
+            "classifier_version": classifier_version,
             "class_name": class_name,
             "probability": probability,
             "n_det_min": n_det_min,
             "n_det_max": n_det_max,
+            "firstmjd_min": firstmjd_min,
+            "firstmjd_max": firstmjd_max,
+            "ra": ra,
+            "dec": dec,
+            "radius": radius,
             "oids": oids,
             # `page` is the *current* page for echoing in row-click URLs; the
             # table template reads `objects_list.current_page` for pagination,
@@ -250,10 +316,16 @@ async def list_objects(
     resp.headers["HX-Push-Url"] = _share_url(
         survey=survey,
         classifier=classifier,
+        classifier_version=classifier_version,
         class_name=class_name,
         probability=probability,
         n_det_min=n_det_min,
         n_det_max=n_det_max,
+        firstmjd_min=firstmjd_min,
+        firstmjd_max=firstmjd_max,
+        ra=ra,
+        dec=dec,
+        radius=radius,
         oids=oids,
         page=page,
     )
@@ -266,11 +338,17 @@ async def detail(
     oid: str,
     survey_id: str,
     classifier: str | None = None,
+    classifier_version: str | None = None,
     identifier: str | None = None,
     class_name: str | None = None,
     probability: float | None = None,
     n_det_min: int | None = None,
     n_det_max: int | None = None,
+    firstmjd_min: float | None = None,
+    firstmjd_max: float | None = None,
+    ra: float | None = None,
+    dec: float | None = None,
+    radius: float | None = None,
     oids: str | None = None,
     page: int | None = None,
 ) -> HTMLResponse:
@@ -292,11 +370,17 @@ async def detail(
         survey=survey_id,
         oid=oid,
         classifier=classifier,
+        classifier_version=classifier_version,
         identifier=identifier,
         class_name=class_name,
         probability=probability,
         n_det_min=n_det_min,
         n_det_max=n_det_max,
+        firstmjd_min=firstmjd_min,
+        firstmjd_max=firstmjd_max,
+        ra=ra,
+        dec=dec,
+        radius=radius,
         oids=oids,
         page=page,
     )
@@ -320,6 +404,13 @@ async def lightcurve(request: Request, oid: str, survey_id: str) -> HTMLResponse
         )
     ra = info.get("ra") if isinstance(info, dict) else None
     dec = info.get("dec") if isinstance(info, dict) else None
+    # TNS report supplies the only non-user source of redshift the LC panel
+    # accepts (the other is a host click in the sky view, which arrives via
+    # JS at runtime). Sequential fetch — we only have ra/dec after info
+    # resolves. Failure is non-fatal: tns_z stays None and the input renders
+    # empty, so the panel never silently assumes a redshift.
+    tns = await tns_service.get_tns_info(ra=ra, dec=dec)
+    tns_z = tns.get("redshift") if tns else None
     return templates.TemplateResponse(
         request,
         "lightcurve/lightcurvePreview.html.jinja",
@@ -329,6 +420,7 @@ async def lightcurve(request: Request, oid: str, survey_id: str) -> HTMLResponse
             "survey_id": survey_id,
             "ra": ra,
             "dec": dec,
+            "tns_z": tns_z,
             "extinction_r": SC(survey_id).extinction_r,
         },
     )
@@ -426,6 +518,12 @@ async def object_information(request: Request, oid: str, survey_id: str) -> HTML
         return HTMLResponse(
             f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
         )
+    # TNS lookup rides the same render as the basic-info panel so the user
+    # sees classification/redshift without a second round trip or a flash of
+    # empty content. Served from the ALeRCE htmx bridge, which takes ra/dec;
+    # any failure (timeout, 5xx, no match) becomes `tns=None` and the
+    # template silently skips the row.
+    tns = await tns_service.get_tns_info(ra=info.get("ra"), dec=info.get("dec"))
     # has_features drives whether the Basic-Info panel renders the
     # "Show features" button. Survey-level flag (config-driven) rather than
     # a hard-coded survey check so LSST lights up automatically once its
@@ -435,6 +533,7 @@ async def object_information(request: Request, oid: str, survey_id: str) -> HTML
         "basic_information/basicInformationPreview.html.jinja",
         {
             "info": info,
+            "tns": tns,
             "survey_id": survey_id,
             "has_features": SC(survey_id).features_url_template is not None,
         },

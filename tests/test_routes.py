@@ -17,12 +17,24 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _stub_tns(monkeypatch):
+    """TNS is additive in the basic-info route; default every test to "no
+    TNS match" so nobody accidentally hits api.alerce.online. The one test
+    that exercises the positive path overrides this monkeypatch locally."""
+    async def no_match(*, ra, dec):
+        return None
+    monkeypatch.setattr("src.routes.htmx.tns_service.get_tns_info", no_match)
+
+
 @pytest.fixture
 def stub_services(monkeypatch):
     async def fake_classifiers(survey):
         return [{"classifier_name": "lc_classifier_top",
                  "formatted_name": "lc classifier top",
-                 "classes": ["SN", "AGN"]}]
+                 "classes": ["SN", "AGN"],
+                 "versions": ["1.0.0", "2.0.1"],
+                 "latest_version": "2.0.1"}]
 
     async def fake_objects(**kwargs):
         page = kwargs.get("page", 1)
@@ -59,6 +71,22 @@ def test_index_shell(client):
     assert "/static/htmx/htmx.min.js" in r.text
     # Fresh `/` keeps the empty-hint default — no deep-link hydration.
     assert "/htmx/detail" not in r.text
+    # Detail nav row lives in the global header now (not the detail
+    # container) so the panels reclaim that vertical space. It's hidden by
+    # default; object_nav.js reveals it when an #object-detail is on screen.
+    # Brand logo links to "/" — full page reload that resets filters and
+    # results-slot to the empty-hint default. SVG lives under /static/img/.
+    assert 'href="/"' in r.text
+    assert "/static/img/alerce-logo.svg" in r.text
+    assert 'id="detail-nav-bar"' in r.text
+    assert "Back to results" in r.text
+    assert 'id="object-nav-list"' in r.text
+    assert 'id="object-nav"' in r.text
+    assert 'id="object-nav-prev"' in r.text
+    assert 'id="object-nav-next"' in r.text
+    assert 'id="object-nav-position"' in r.text
+    assert "navObject('prev')" in r.text
+    assert "navObject('next')" in r.text
 
 
 def test_index_deep_link_to_object(client):
@@ -167,12 +195,18 @@ def test_list_objects_pushes_full_filter_url(client, stub_services):
     drill-in/back cycle (or a share link) reconstructs the exact listing."""
     r = client.get(
         "/htmx/list_objects?survey=ztf&classifier=lc_classifier_top"
-        "&class_name=SN&probability=0.5&n_det_min=5&n_det_max=50&oids=ZTF1,ZTF2&page=3"
+        "&classifier_version=2.1.0&class_name=SN&probability=0.5"
+        "&n_det_min=5&n_det_max=50"
+        "&firstmjd_min=60000.0&firstmjd_max=60100.0"
+        "&ra=150.0&dec=2.0&radius=30.0"
+        "&oids=ZTF1,ZTF2&page=3"
     )
     assert r.status_code == 200
     assert r.headers.get("HX-Push-Url") == (
-        "/?survey=ztf&classifier=lc_classifier_top&class_name=SN&probability=0.5"
-        "&n_det_min=5&n_det_max=50&oids=ZTF1%2CZTF2&page=3"
+        "/?survey=ztf&classifier=lc_classifier_top&classifier_version=2.1.0"
+        "&class_name=SN&probability=0.5"
+        "&n_det_min=5&n_det_max=50&firstmjd_min=60000.0&firstmjd_max=60100.0"
+        "&ra=150.0&dec=2.0&radius=30.0&oids=ZTF1%2CZTF2&page=3"
     )
 
 
@@ -262,6 +296,7 @@ def test_search_form_prefills_all_filters(client, stub_services):
     r = client.get(
         "/htmx/search_objects/?survey=lsst&classifier=lc_classifier_top"
         "&class_name=SN&probability=0.42&n_det_min=5&n_det_max=50&oids=OID1,OID2"
+        "&firstmjd_min=60000.5&firstmjd_max=60100.5&ra=150.0&dec=2.0&radius=45"
     )
     assert r.status_code == 200
     # Free-text OID list is pre-populated.
@@ -272,8 +307,46 @@ def test_search_form_prefills_all_filters(client, stub_services):
     # Min/max detection inputs carry the integers.
     assert 'value="5"' in r.text
     assert 'value="50"' in r.text
+    # Discovery-date and conesearch fields are pre-filled too.
+    assert 'value="60000.5"' in r.text
+    assert 'value="60100.5"' in r.text
+    assert 'value="150.000000 2.000000"' in r.text
+    # radius is parsed as float by FastAPI; Jinja renders 45.0 → "45.0"
+    assert 'value="45.0"' in r.text
     # Dependent class options are rendered server-side with SN selected.
     assert '<option value="SN" selected>SN</option>' in r.text
+
+
+def test_search_form_renders_classifier_version_dropdown(client, stub_services):
+    """The version select carries the static Latest/Any options plus a
+    `data-versions` JSON list on each classifier option so the inline JS
+    can repopulate the per-version options on classifier change."""
+    r = client.get("/htmx/search_objects/?survey=lsst&classifier=lc_classifier_top")
+    assert r.status_code == 200
+    # Static modes always present.
+    assert 'id="classifier_version"' in r.text
+    assert '<option value="latest"' in r.text
+    assert '<option value="any"' in r.text
+    # Per-version options pre-rendered for the deep-linked classifier so the
+    # form is fully hydrated without waiting on a JS event.
+    assert '<option value="1.0.0"' in r.text
+    assert '<option value="2.0.1"' in r.text
+    # Each classifier option carries its versions + latest as data attrs so
+    # client-side JS can resolve "Latest" and rebuild the dropdown without
+    # a server round trip.
+    assert 'data-versions=' in r.text
+    assert 'data-latest-version="2.0.1"' in r.text
+
+
+def test_search_form_preselects_classifier_version(client, stub_services):
+    """Deep-link with `classifier_version=1.0.0` → that option lands as
+    `selected` so the form mirrors what the URL is asking for."""
+    r = client.get(
+        "/htmx/search_objects/?survey=lsst&classifier=lc_classifier_top"
+        "&classifier_version=1.0.0"
+    )
+    assert r.status_code == 200
+    assert '<option value="1.0.0" selected>1.0.0</option>' in r.text
 
 
 def test_index_hydrates_list_from_any_filter(client):
@@ -332,7 +405,6 @@ def test_row_hx_get_carries_full_filter_set(client, stub_services):
 def test_detail_renders_container(client):
     r = client.get("/htmx/detail?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
-    assert "Back to results" in r.text
     assert r.headers.get("HX-Push-Url") == "/?survey=ztf&oid=ZTF21abc"
     assert "/htmx/object_information?oid=ZTF21abc&survey_id=ztf" in r.text
     assert 'id="stamps-slot"' in r.text
@@ -344,17 +416,15 @@ def test_detail_renders_container(client):
     assert 'id="coord-residuals-slot"' in r.text
     assert "/htmx/coord_residuals?oid=ZTF21abc&survey_id=ztf" in r.text
     # data-oid on the root lets object_nav.js find the current OID (the URL
-    # can lag by a tick after a client-side navigation).
+    # can lag by a tick after a client-side navigation) and toggle the
+    # global header's #detail-nav-bar visibility.
     assert 'data-oid="ZTF21abc"' in r.text
     assert 'data-survey-id="ztf"' in r.text
-    # Prev/next arrow buttons + the wrapper that object_nav.js reveals.
-    assert 'id="object-nav"' in r.text
-    assert 'id="object-nav-prev"' in r.text
-    assert 'id="object-nav-next"' in r.text
-    assert "navObject('prev')" in r.text
-    assert "navObject('next')" in r.text
-    # Position indicator (populated client-side from window._resultsNav).
-    assert 'id="object-nav-position"' in r.text
+    # The Back button + prev/next arrows used to live in this fragment but
+    # were promoted to the global header (#detail-nav-bar in index.html.jinja)
+    # so the detail panels reclaim that row of vertical space.
+    assert "Back to results" not in r.text
+    assert 'id="object-nav"' not in r.text
 
 
 def test_detail_rejects_unknown_survey(client):
@@ -389,12 +459,14 @@ def test_object_information_renders_basic_fields(client, monkeypatch):
     assert "-30:00:00.00" in r.text
     assert 'data-sex="12:00:00.000"' in r.text
     assert 'data-sex="-30:00:00.00"' in r.text
-    # Coord toolbar: format toggle + system toggle + copy button all present
-    # when ra/dec exist. The system toggle cycles Eq/Gal/Ecl and pre-fills the
-    # value cells with the rotated coords so JS never has to do the maths.
+    # Coord controls: HMS/Deg format toggle, copy button, ⇄ system toggle
+    # (next to RA), and the two .coord-label spans it swaps labels on.
+    # Pre-computed galactic/ecliptic values are stashed on the value cells so
+    # JS never has to do the rotation on click.
     assert "coord-format-toggle" in r.text
     assert "coord-system-toggle" in r.text
     assert "coord-copy-btn" in r.text
+    assert "coord-label" in r.text
     assert 'data-gal="298.88000"' in r.text
     assert 'data-gal="31.98000"' in r.text
     assert 'data-ecl="201.76000"' in r.text
@@ -425,7 +497,70 @@ def test_object_information_hides_features_button_for_lsst(client, monkeypatch):
     )
     r = client.get("/htmx/object_information?oid=9123456789012345&survey_id=lsst")
     assert r.status_code == 200
-    assert "Show features" not in r.text
+    # The Show-features button is identifiable by its hx-target attribute —
+    # plain "Show features" text also appears in the hover help, so we key on
+    # the button's htmx wiring to assert "button not rendered" cleanly.
+    assert 'hx-target="#features-modal"' not in r.text
+
+
+def test_object_information_renders_tns_block_when_match(client, monkeypatch):
+    """Positive-path for the TNS strip: when the ALeRCE bridge returns a
+    match, the panel should expose class/name/redshift and a link to the
+    TNS object page."""
+    async def fake_info(*, survey, oid):
+        return {
+            "oid": oid, "survey": survey,
+            "ra": 353.977, "dec": 47.076,
+            "ra_hms": "23:35:54.528", "dec_dms": "+47:04:33.49",
+            "l_gal": 108.1, "b_gal": -13.1,
+            "lambda_ecl": 10.0, "beta_ecl": 45.0,
+            "firstmjd": 60000.0, "lastmjd": 60100.0, "delta_mjd": 100.0,
+            "n_det": 5, "n_non_det": 0, "n_forced": None,
+            "corrected": True, "stellar": False,
+            "archives": [],
+        }
+
+    async def fake_tns(*, ra, dec):
+        return {
+            "type": "SN Ia",
+            "name": "2025twl",
+            "redshift": 0.043,
+            "url": "https://www.wis-tns.org/object/2025twl",
+        }
+
+    monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
+    monkeypatch.setattr("src.routes.htmx.tns_service.get_tns_info", fake_tns)
+    r = client.get("/htmx/object_information?oid=ZTF25twl&survey_id=ztf")
+    assert r.status_code == 200
+    assert "SN Ia" in r.text
+    assert "2025twl" in r.text
+    assert "0.0430" in r.text
+    assert "https://www.wis-tns.org/object/2025twl" in r.text
+    # Marker class for the compact one-line strip — also the thing the
+    # negative-path test keys on, so the two assertions stay symmetric.
+    assert "tns-block" in r.text
+
+
+def test_object_information_no_tns_block_when_no_match(client, monkeypatch):
+    """Autouse fixture returns None by default; make sure the template omits
+    the TNS block entirely rather than showing an empty "TNS" header."""
+    async def fake_info(*, survey, oid):
+        return {
+            "oid": oid, "survey": survey, "ra": 1.0, "dec": 2.0,
+            "ra_hms": "00:04:00.000", "dec_dms": "+02:00:00.00",
+            "l_gal": 109.8, "b_gal": -60.0,
+            "lambda_ecl": 1.8, "beta_ecl": 1.5,
+            "firstmjd": 60000.0, "lastmjd": 60001.0, "delta_mjd": 1.0,
+            "n_det": 1, "n_non_det": 0, "n_forced": None,
+            "corrected": None, "stellar": None, "archives": [],
+        }
+
+    monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
+    r = client.get("/htmx/object_information?oid=x&survey_id=ztf")
+    assert r.status_code == 200
+    # The block has a unique `.tns-block` marker class; the hover help also
+    # contains the word "TNS", so keying on the class avoids false positives.
+    assert "tns-block" not in r.text
 
 
 def test_features_route_renders_table_with_version_picker(client, monkeypatch):
@@ -569,6 +704,49 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
     assert 'data-dec="30.0"' in r.text
     assert "data-ext-r=" in r.text
     assert "3.237" in r.text  # R_g for ZTF/LSST
+    # CSV download button + per-chart data-oid it uses for the filename.
+    assert 'class="lc-download-btn' in r.text
+    assert 'data-oid="ZTF21abc"' in r.text
+    # No TNS match in this test (autouse fixture stubs to None) ⇒ the z input
+    # must NOT be pre-filled. Guarantees we never silently assume a redshift.
+    assert 'id="lc-redshift-ZTF21abc"' in r.text
+    assert "value=" not in (
+        r.text.split('id="lc-redshift-ZTF21abc"')[1].split(">", 1)[0]
+    )
+
+
+def test_lightcurve_prefills_z_from_tns(client, monkeypatch):
+    """When TNS reports a redshift for this position, the z input renders
+    with `value="..."` so the JS picks it up on first sync — confirmed
+    upstream value is the only non-user source of redshift the LC accepts."""
+    async def fake_lc(*, survey, oid):
+        return {
+            "survey": survey,
+            "bands": [{"name": "g", "points": [{
+                "mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0,
+                "sci_flux": None, "e_sci_flux": None,
+                "identifier": "1", "has_stamp": False,
+            }]}],
+            "forced_phot_bands": [],
+            "n_det": 1, "n_fp": 0, "has_science_flux": True,
+        }
+
+    async def fake_info(*, survey, oid):
+        return {"ra": 100.0, "dec": -20.0}
+
+    async def fake_tns(*, ra, dec):
+        return {"type": "SN Ia", "name": "2025abc",
+                "redshift": 0.087, "url": "https://www.wis-tns.org/object/2025abc"}
+
+    monkeypatch.setattr("src.routes.htmx.lightcurve_service.get_lightcurve", fake_lc)
+    monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
+    monkeypatch.setattr("src.routes.htmx.tns_service.get_tns_info", fake_tns)
+    r = client.get("/htmx/lightcurve?oid=ZTF21xyz&survey_id=ztf")
+    assert r.status_code == 200
+    # The TNS redshift lands on the input as a server-rendered value attr.
+    assert 'id="lc-redshift-ZTF21xyz"' in r.text
+    z_input = r.text.split('id="lc-redshift-ZTF21xyz"')[1].split(">", 1)[0]
+    assert 'value="0.087"' in z_input
 
 
 def test_lightcurve_empty_shows_message(client, monkeypatch):
@@ -596,6 +774,9 @@ def test_lightcurve_empty_shows_message(client, monkeypatch):
     # Toggles only render alongside a chart.
     assert "lc-mode-toggle" not in r.text
     assert "lc-source-toggle" not in r.text
+    # Download button lives inside the same conditional — nothing to
+    # download when there's no data.
+    assert "lc-download-btn" not in r.text
 
 
 def test_lightcurve_hides_sci_toggle_when_survey_lacks_science_flux(client, monkeypatch):

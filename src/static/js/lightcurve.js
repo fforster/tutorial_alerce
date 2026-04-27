@@ -45,9 +45,14 @@
   //
   // Only non-default values end up in the URL, matching the "dropped if
   // default" convention in routes/htmx.py::_share_url.
+  // z / E(B-V) are deliberately NOT persisted: redshift should only come
+  // from a TNS report (server pre-fills the input) or a host click in the
+  // sky view; E(B-V) should only come from the IRSA dust proxy. Carrying
+  // them in the URL would let an old query-string assume values for an
+  // object that never had them confirmed.
   const LC_DEFAULTS = {
     mode: "flux", source: "diff", abs: "app", dered: "obs", fold: "off",
-    z: null, ebv: null, drShown: false, drAlpha: 0.10,
+    drShown: false, drAlpha: 0.10,
     overlay: "none",
   };
 
@@ -63,8 +68,6 @@
       abs:   p.get("lc_abs")    || LC_DEFAULTS.abs,
       dered: p.get("lc_dered")  || LC_DEFAULTS.dered,
       fold:  p.get("lc_fold")   || LC_DEFAULTS.fold,
-      z:     num("lc_z"),
-      ebv:   num("lc_ebv"),
       drShown: p.get("lc_dr") === "on",
       drAlpha: num("lc_dr_alpha") ?? LC_DEFAULTS.drAlpha,
       overlay: p.get("lc_overlay") || LC_DEFAULTS.overlay,
@@ -84,7 +87,6 @@
       state.abs === LC_DEFAULTS.abs &&
       state.dered === LC_DEFAULTS.dered &&
       state.fold === LC_DEFAULTS.fold &&
-      state.z == null && state.ebv == null &&
       !state.drShown &&
       Math.abs(state.drAlpha - LC_DEFAULTS.drAlpha) < 1e-6 &&
       state.overlay === LC_DEFAULTS.overlay;
@@ -98,14 +100,16 @@
   }
 
   function cacheAndPushLcState(chart) {
+    // z / ebv intentionally absent: they're derived from per-object sources
+    // (TNS report, host-galaxy click, dust proxy) rather than user-toggled
+    // UI state, so persisting them across navigation would leak one
+    // object's redshift onto the next.
     const state = {
       mode: chart.$lcMode,
       source: chart.$lcSource,
       abs: chart.$lcAbs,
       dered: chart.$lcDered,
       fold: chart.$lcFold || "off",
-      z: chart.$lcZ,
-      ebv: chart.$lcEbv,
       drShown: chart.$lcDrShown,
       drAlpha: chart.$lcDrAlpha,
       overlay: chart.$lcOverlay || "none",
@@ -121,8 +125,11 @@
     setOrDel("lc_abs",    state.abs,    LC_DEFAULTS.abs);
     setOrDel("lc_dered",  state.dered,  LC_DEFAULTS.dered);
     setOrDel("lc_fold",   state.fold,   LC_DEFAULTS.fold);
-    setOrDel("lc_z",      state.z,      null);
-    setOrDel("lc_ebv",    state.ebv,    null);
+    // Stale lc_z / lc_ebv from older URLs/cached links should disappear on
+    // first state push, so explicitly delete them whether or not they were
+    // present in the incoming URL.
+    url.searchParams.delete("lc_z");
+    url.searchParams.delete("lc_ebv");
     setOrDel("lc_dr", state.drShown ? "on" : "off", "off");
     // Default alpha compared with a small epsilon so 0.10 from the URL
     // round-trips to "absent" instead of "0.1".
@@ -390,30 +397,54 @@
     return traces;
   }
 
-  // FLEET mag model — grows polynomially from t0, then levels to m0. Per-band
-  // first-MJD reference matches the extractor's: earliest alert detection in
-  // that band with flux > 1 µJy (= 1000 nJy in our units). We don't carry
-  // FP first-MJDs through the template, so alert-only is the best we can do
-  // without a new server round-trip; this agrees with the reference except
-  // when FP points precede the first alert (uncommon in the FLEET regime).
+  // FLEET mag model — grows polynomially from t0, then levels to m0.
+  //
+  // Per-band time reference matches the FleetExtractor in
+  // alercebroker/pipeline/lc_classifier (tde_extractor.py::FleetExtractor):
+  //   observations = pd.concat([detections, forced_photometry])
+  //   observations = observations[brightness > 1]   # > 1 µJy diff flux
+  //   observations = observations[e_brightness > 0]
+  //   first_mjd   = band_observations.sort_values("mjd").iloc[0]["mjd"]
+  // — i.e. the earliest MJD across the UNION of detections and forced
+  // photometry in that band, each filtered to (flux > 1 µJy AND σ > 0).
+  // Dropping either source from the union shifts the anchor: FP-only
+  // pushes it earlier (noise spikes that clear 1 µJy in the quiescent
+  // baseline), alert-only pushes it later (misses the real FP onset).
   function fleetMag(t_norm, a, w, m0, t0) {
     const dt = t_norm - t0;
     return Math.exp(w * dt) - a * w * dt + m0;
   }
 
-  function computeFleetTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod) {
+  function computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod) {
     if (!fits || !fits.fleet) return [];
     const env = mjdEnvelope(bands);
     if (!env) return [];
-    const FLUX_FLOOR_NJY = 1000;  // reference: > 1 µJy. Our units → 1000 nJy.
+    const FLUX_FLOOR_NJY = 1000;  // extractor threshold 1 µJy → 1000 nJy.
+    // The extractor filters on `brightness > 1 µJy` where `brightness` is
+    // SIGNED diff flux (positive = brightening, negative = dimming). Our
+    // `pt.flux` is |diff flux| (ZTF psf_flux comes from a positive magpsf);
+    // the sign lives in `pt.isdiffpos`. Without multiplying the sign back
+    // in, dimming-event points (isdiffpos=−1) with large |flux| clear the
+    // threshold and pull the per-band first_mjd far before the real trigger
+    // (the original bug). LSST flux is already signed and isdiffpos=null,
+    // which this guard treats as positive — the right default there.
+    const pickBright = (pts) => (pts || [])
+      .filter((pt) => {
+        if (!isFinite(pt.mjd) || pt.e_flux == null || !(pt.e_flux > 0)) return false;
+        const sign = pt.isdiffpos === -1 ? -1 : 1;
+        return pt.flux * sign > FLUX_FLOOR_NJY;
+      })
+      .map((pt) => pt.mjd);
     const traces = [];
     for (const [band, p] of Object.entries(fits.fleet)) {
-      const inBand = (bands || []).find((b) => b.name === band);
-      if (!inBand) continue;
-      const mjdsBright = (inBand.points || [])
-        .filter((pt) => isFinite(pt.mjd) && isFinite(pt.flux) && pt.flux > FLUX_FLOOR_NJY)
-        .map((pt) => pt.mjd);
-      const firstMjdBand = mjdsBright.length ? Math.min(...mjdsBright) : env.min;
+      const alertInBand = (bands || []).find((b) => b.name === band);
+      const fpInBand = (fpBands || []).find((b) => b.name === band);
+      const brightMjds = [
+        ...pickBright(alertInBand?.points),
+        ...pickBright(fpInBand?.points),
+      ];
+      if (!brightMjds.length) continue;
+      const firstMjdBand = Math.min(...brightMjds);
       const grid = [];
       for (let i = 0; i < 100; i++) {
         const mjd = env.min + ((env.max - env.min) * i) / 99;
@@ -472,8 +503,9 @@
     const key = chart.$lcOverlay;
     if (!fits || !key || key === "none") return [];
     const bands = (chart.$lcRaw && chart.$lcRaw.bands) || [];
+    const fpBands = (chart.$lcRaw && chart.$lcRaw.fpBands) || [];
     if (key === "spm") return computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
-    if (key === "fleet") return computeFleetTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
+    if (key === "fleet") return computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod);
     if (key === "tde") return computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
     return [];
   }
@@ -779,6 +811,9 @@
       },
     });
     chart.$lcRaw = { bands, fpBands };
+    // Stashed so the CSV download can emit the survey name and the period
+    // (for a fold-active export note) without re-parsing canvas.dataset.lc.
+    chart.$lcSurvey = data.survey || "";
     // Parametric-fit bundle from the server; {} when none available. Used by
     // buildOverlayDatasets + renderOverlayInfo; the select's options are
     // pre-disabled server-side for overlays this object has no data for.
@@ -820,19 +855,14 @@
     canvas.addEventListener("dblclick", () => chart.resetZoom && chart.resetZoom());
     charts.set(canvas, chart);
 
-    // Pre-fill z / E(B-V) inputs from restored state BEFORE syncRedshift/EBV
-    // run — otherwise the guards in those syncs would see empty inputs and
-    // demote Abs→App / Der→Obs. An empty user-typed value takes precedence
-    // over restored state (don't clobber a user's in-progress edit).
+    // z / E(B-V) are NOT restored from cache or URL — they come from the
+    // server-rendered input value (TNS pre-fill) or from the dust proxy
+    // fetch below, so an old object's z can't bleed onto a new one. Sync
+    // immediately so the chart picks up any TNS-supplied value the
+    // template baked into the input's value attribute.
     const zInput = document.querySelector(`.lc-redshift-input[data-target="${canvas.id}"]`);
-    if (zInput && !zInput.value && restored.z != null && restored.z > 0) {
-      zInput.value = String(restored.z);
-    }
     if (zInput) syncRedshiftFromInput(chart, zInput, false);
     const ebvInput = document.querySelector(`.lc-ebv-input[data-target="${canvas.id}"]`);
-    if (ebvInput && !ebvInput.value && restored.ebv != null && restored.ebv > 0) {
-      ebvInput.value = String(restored.ebv);
-    }
     if (ebvInput) syncEbvFromInput(chart, ebvInput, false);
 
     // Apply the restored configuration to the chart (axis labels, dataset
@@ -1166,6 +1196,173 @@
     });
   }
 
+  // ── CSV export ────────────────────────────────────────────────────────────
+  //
+  // One button → full snapshot of the plotted data. We re-run `projectPoint`
+  // over raw det/FP/DR bands with the chart's current projection state, so
+  // the CSV matches what the user sees after every toggle. Fold is
+  // deliberately NOT applied: it's a display transform that would duplicate
+  // every row (two cycles side-by-side), which is useless in a file; the
+  // period lands in the metadata header instead.
+  function pad2(n) { return String(n).padStart(2, "0"); }
+
+  function filenameTimestamp() {
+    // Local time so the filename lines up with the user's clock — easier to
+    // pair with their notebook timestamps than UTC. `YYYYMMDDTHHMMSS`
+    // (ISO-compact) keeps filenames sortable.
+    const d = new Date();
+    return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`
+         + `T${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+  }
+
+  // All 16 projection combinations — axis × source × distance × extinction.
+  // The export writes every combination as its own column so downstream
+  // analysis never needs to re-run the transforms; abs cells stay empty
+  // when z isn't set, der cells stay empty when E(B-V) isn't set, so a
+  // consumer can tell "no data here" from "zero correction applied".
+  const AXES = ["flux", "mag"];
+  const SOURCES = ["diff", "sci"];
+  const DISTS = ["app", "abs"];
+  const EXTS = ["obs", "der"];
+
+  function fmtNum(v) {
+    // toPrecision(8) gives a balance between file size and round-trip
+    // accuracy; empty string for null/NaN so the CSV cell is blank rather
+    // than printing "null".
+    if (v == null || !isFinite(v)) return "";
+    return Number(v).toPrecision(8);
+  }
+
+  function downloadLcData(chart, oid) {
+    const raw = chart.$lcRaw;
+    if (!raw) return;
+    // Compute distmod + A_band from the chart's current z / E(B-V),
+    // independently of the Abs/Der toggle state — the export carries all
+    // 16 projections, not just the active one. If z or E(B-V) is unset,
+    // the corresponding abs/der columns stay empty so consumers can
+    // distinguish "user hasn't provided this yet" from "the correction
+    // was zero".
+    const z = chart.$lcZ;
+    const ebv = chart.$lcEbv;
+    const extR = chart.$lcExtR || {};
+    const distMod = (z > 0 && typeof window.cosmology !== "undefined")
+      ? (isFinite(window.cosmology.distanceModulus(z))
+         ? window.cosmology.distanceModulus(z) : null)
+      : null;
+    const extByBand = {};
+    if (ebv > 0) {
+      for (const [b, r] of Object.entries(extR)) extByBand[b] = r * ebv;
+    }
+    const survey = chart.$lcSurvey || "";
+    const foldActive = chart.$lcFold === "fold" && chart.$lcPeriod > 0;
+    const now = new Date();
+
+    const lines = [];
+    // Metadata header — `#`-prefixed so pandas/astropy can skip it with the
+    // standard `comment="#"` option. Units and conventions are explicit
+    // here so the column names can stay terse.
+    lines.push("# ALeRCE light curve export");
+    lines.push(`# oid: ${oid}`);
+    lines.push(`# survey: ${survey}`);
+    lines.push(`# downloaded_at: ${now.toISOString()}`);
+    lines.push("# flux_unit: nJy (AB ZP = 31.4)");
+    lines.push("# mag_unit: AB");
+    lines.push("# column_schema: {axis}_{source}_{distance}_{extinction}");
+    lines.push("#   axis=flux|mag, source=diff|sci, distance=app|abs, extinction=obs|der");
+    lines.push("# error columns are prefixed with 'e_' (symmetric 1σ;"
+      + " for mag the small-error linearization of the flux error)");
+    if (z != null && z > 0) lines.push(`# redshift: ${z}`);
+    else lines.push("# redshift: (unset — *_abs columns will be empty)");
+    if (distMod != null) lines.push(`# distmod: ${distMod.toFixed(4)} mag (Planck 2018)`);
+    if (ebv != null && ebv > 0) lines.push(`# ebv: ${ebv}`);
+    else lines.push("# ebv: (unset — *_der columns will be empty)");
+    if (Object.keys(extByBand).length > 0) {
+      lines.push("# A_band (Fitzpatrick 1999, mag): "
+        + Object.entries(extByBand).map(([k,v]) => `${k}=${v.toFixed(4)}`).join(", "));
+    }
+    if (foldActive) {
+      lines.push(`# fold_period_days: ${chart.$lcPeriod}`);
+      lines.push("# note: fold is a display transform; rows below are unfolded MJD.");
+    }
+
+    // Build the column header. Identity columns first, then the 32 value
+    // + error columns in a deterministic order so two exports of the
+    // same object always produce the same schema.
+    const dataCols = [];
+    for (const axis of AXES)
+      for (const source of SOURCES)
+        for (const dist of DISTS)
+          for (const ext of EXTS) {
+            const key = `${axis}_${source}_${dist}_${ext}`;
+            dataCols.push(key, `e_${key}`);
+          }
+    lines.push(["phot_type", "band", "mjd", "identifier", ...dataCols].join(","));
+
+    // Per-row: call projectPoint for each of the 16 combinations with the
+    // appropriate distmod/extinction. projectPoint returns null when the
+    // source flux is null (e.g. sci columns on a point without science
+    // photometry, or mag on negative diff flux) → the cell stays empty.
+    const emit = (phot_type, bandList) => {
+      for (const band of bandList || []) {
+        const A_band = extByBand[band.name] || 0;
+        for (const p of band.points || []) {
+          if (!isFinite(p.mjd)) continue;
+          const cells = [];
+          for (const axis of AXES)
+            for (const source of SOURCES)
+              for (const dist of DISTS)
+                for (const ext of EXTS) {
+                  // abs/der columns stay empty when the user hasn't
+                  // provided z / E(B-V); otherwise route the active
+                  // scalar through projectPoint so this export uses the
+                  // exact same pipeline the chart does.
+                  const dm = dist === "abs" ? (distMod != null ? distMod : NaN) : null;
+                  const em = ext === "der" ? (ebv > 0 ? A_band : NaN) : 0;
+                  if (Number.isNaN(dm) || Number.isNaN(em)) {
+                    cells.push("", "");
+                    continue;
+                  }
+                  const proj = projectPoint(p, axis, source, dm, em);
+                  if (!proj) { cells.push("", ""); continue; }
+                  cells.push(fmtNum(proj.y), fmtNum(proj.e));
+                }
+          const ident = p.identifier != null ? String(p.identifier) : "";
+          lines.push([phot_type, band.name, p.mjd, ident, ...cells].join(","));
+        }
+      }
+    };
+    emit("alert_detection", raw.bands);
+    emit("forced_photometry", raw.fpBands);
+    // Only export ZTF DR when the user has it turned on — otherwise they'd
+    // get archival points they never asked for, and in Diff mode those
+    // points would silently drop (DR has no difference flux) making the
+    // file subtly inconsistent with the plot.
+    if (chart.$lcDrShown) emit("ztf_dr", chart.$lcDrBands);
+
+    const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${oid}_lightcurve_${filenameTimestamp()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Revoke on next tick so the browser has had a chance to start the
+    // download stream before the blob URL is freed.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function bindDownloadButton(btn) {
+    if (btn.dataset.lcDownloadBound === "1") return;
+    btn.dataset.lcDownloadBound = "1";
+    btn.addEventListener("click", () => {
+      const canvas = document.getElementById(btn.dataset.target);
+      const chart = canvas ? charts.get(canvas) : null;
+      if (!chart) return;
+      downloadLcData(chart, btn.dataset.oid || "");
+    });
+  }
+
   function initToggles(root) {
     const scope = root || document;
     for (const spec of Object.values(TOGGLE_SPECS)) {
@@ -1176,6 +1373,7 @@
     scope.querySelectorAll(".lc-dr-toggle").forEach(bindDrButton);
     scope.querySelectorAll(".lc-dr-alpha").forEach(bindDrAlphaSlider);
     scope.querySelectorAll(".lc-overlay-select").forEach(bindOverlaySelect);
+    scope.querySelectorAll(".lc-download-btn").forEach(bindDownloadButton);
   }
 
   function initAll(root) {

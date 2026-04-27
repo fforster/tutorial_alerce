@@ -20,9 +20,29 @@ function send_form_Data() {
   const minDet = _val("min_detections");
   const maxDet = _val("max_detections");
 
+  // Classifier version dropdown: "latest" resolves to the chosen
+  // classifier option's data-latest-version (computed server-side),
+  // "any" sends nothing, otherwise pass the picked version through.
+  // Version is meaningless without a chosen classifier, so we skip
+  // the field entirely in that case.
+  const versionSelect = document.getElementById("classifier_version");
+  const versionMode = versionSelect ? versionSelect.value : "latest";
+  let resolvedVersion = null;
+  if (classifier && versionMode && versionMode !== "any") {
+    if (versionMode === "latest") {
+      const sel = document.getElementById("classifier");
+      const opt = sel ? sel.options[sel.selectedIndex] : null;
+      const latest = opt?.dataset?.latestVersion || "";
+      if (latest) resolvedVersion = latest;
+    } else {
+      resolvedVersion = versionMode;
+    }
+  }
+
   const payload = { survey };
   if (classifier) payload.classifier = classifier;
   if (className) payload.class_name = className;
+  if (resolvedVersion) payload.classifier_version = resolvedVersion;
   if (probability && parseFloat(probability) > 0) payload.probability = probability;
   // `oids` (plural) is the free-text OID-list search. Distinct from the detail
   // view's `oid=` (single-object), which shares the URL namespace but means
@@ -30,6 +50,38 @@ function send_form_Data() {
   if (oidsRaw) payload.oids = oidsRaw;
   if (minDet) payload.n_det_min = minDet;
   if (maxDet) payload.n_det_max = maxDet;
+
+  // Discovery-date filter: free-text input parsed into MJD client-side
+  // (accepts MJD, JD, ISO date, etc. — see coords.js::smartDateToMJD).
+  // Only the parsed numeric value goes upstream; the original text stays in
+  // the form for the user.
+  const dateFromRaw = _val("filter-date-from");
+  const dateToRaw = _val("filter-date-to");
+  if (window.smartDateToMJD) {
+    if (dateFromRaw) {
+      const m = window.smartDateToMJD(dateFromRaw);
+      if (m != null) payload.firstmjd_min = m;
+    }
+    if (dateToRaw) {
+      const m = window.smartDateToMJD(dateToRaw);
+      if (m != null) payload.firstmjd_max = m;
+    }
+  }
+
+  // Cone-search filter: parse the "ra dec" free-text field into degrees
+  // (any format: plain, comma-separated, sexagesimal). Radius is taken as
+  // arcsec; only attached when coords actually parsed so the upstream call
+  // stays a global listing if the field is bad/empty.
+  const coordsRaw = _val("filter-coords");
+  if (coordsRaw && window.parseCoordinates) {
+    const c = window.parseCoordinates(coordsRaw);
+    if (c) {
+      payload.ra = c.ra;
+      payload.dec = c.dec;
+      const r = _val("filter-radius");
+      if (r) payload.radius = r;
+    }
+  }
   return payload;
 }
 

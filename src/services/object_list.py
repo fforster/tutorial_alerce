@@ -13,7 +13,14 @@ DEFAULT_PAGE_SIZE = 20
 def _normalize_ztf_row(row: dict[str, Any]) -> dict[str, Any]:
     """ZTF API uses different field names than LSST — map to the common schema.
 
-    Mirrors the prototype's ztf normalization after searchObjects().
+    Mirrors the prototype's ztf normalization after searchObjects(), with one
+    deliberate divergence: the prototype copied `step_id_corr` into
+    `classifier_version`, but `step_id_corr` is the correction/
+    feature-extractor pipeline step ID, NOT the classifier model version.
+    ZTF's `/objects` response simply doesn't carry the classifier version
+    per row (the classifier runs deterministically off the features), so we
+    leave `classifier_version` unset on ZTF rows. We do surface the step
+    under its own name (`pipeline_version`) for callers that want it.
     """
     if row.get("ndet") is not None and row.get("n_det") is None:
         row["n_det"] = row["ndet"]
@@ -21,8 +28,8 @@ def _normalize_ztf_row(row: dict[str, Any]) -> dict[str, Any]:
         row["class_name"] = row["class"]
     if row.get("classifier") is not None and row.get("classifier_name") is None:
         row["classifier_name"] = row["classifier"]
-    if row.get("step_id_corr") is not None and row.get("classifier_version") is None:
-        row["classifier_version"] = row["step_id_corr"]
+    if row.get("step_id_corr") is not None and row.get("pipeline_version") is None:
+        row["pipeline_version"] = row["step_id_corr"]
     return row
 
 
@@ -30,10 +37,16 @@ def build_search_params(
     *,
     survey: str,
     classifier: str | None,
+    classifier_version: str | None = None,
     class_name: str | None,
     probability: float | None,
     n_det_min: int | None,
     n_det_max: int | None,
+    firstmjd_min: float | None = None,
+    firstmjd_max: float | None = None,
+    ra: float | None = None,
+    dec: float | None = None,
+    radius: float | None = None,
     oid: str | None,
     page: int,
     page_size: int,
@@ -45,19 +58,47 @@ def build_search_params(
     }
     if classifier:
         p["classifier"] = classifier
+    if classifier_version:
+        # The client resolves "Latest" → concrete version before submit,
+        # and "Any" → unset, so anything reaching here is a real version
+        # string we can pass straight to the upstream filter.
+        p["classifier_version"] = classifier_version
     if class_name:
         p["class_name"] = class_name
     if probability is not None and probability > 0:
         p["probability"] = probability
-    if n_det_min is not None:
-        p["n_det"] = n_det_min  # ZTF uses ndet; extra_params remaps.
-    # LSST list_objects uses a two-ended range via n_det_min/n_det_max.
-    if survey == "lsst":
-        if n_det_min is not None:
-            p["n_det_min"] = n_det_min
-            p.pop("n_det", None)
-        if n_det_max is not None:
-            p["n_det_max"] = n_det_max
+    # n_det filter: both ALeRCE list_objects endpoints take `n_det` as a
+    # list `[min, max]` sent as repeated query params (FastAPI's standard
+    # encoding for `list[int]` — see the production filter model at
+    # alercebroker/web-services :: multisurveys-apis/src/object_api/models/filters.py).
+    # ZTF's `_ztf_extra_params` later renames `n_det` → `ndet` (the param
+    # name ZTF actually accepts); LSST takes `n_det` as-is. A single-value
+    # list acts as min-only; we use `[0, max]` for max-only so the filter
+    # is one-ended without us having to handle a third "max-only" case
+    # downstream.
+    if n_det_min is not None and n_det_max is not None:
+        p["n_det"] = [n_det_min, n_det_max]
+    elif n_det_min is not None:
+        p["n_det"] = [n_det_min]
+    elif n_det_max is not None:
+        p["n_det"] = [0, n_det_max]
+    # Discovery-date range — same list-of-floats encoding as n_det. The
+    # production Filters model has `firstmjd: list[float] | None`, so we
+    # pass two repeated `firstmjd=…` params. Open-ended-min collapses to a
+    # single-element list (consistent with n_det behavior).
+    if firstmjd_min is not None and firstmjd_max is not None:
+        p["firstmjd"] = [firstmjd_min, firstmjd_max]
+    elif firstmjd_min is not None:
+        p["firstmjd"] = [firstmjd_min]
+    elif firstmjd_max is not None:
+        p["firstmjd"] = [0.0, firstmjd_max]
+    # Conesearch — only meaningful when ra+dec are both present. Radius
+    # defaults to 30 arcsec to match the prototype's UI default; the
+    # upstream API accepts arcsec.
+    if ra is not None and dec is not None:
+        p["ra"] = ra
+        p["dec"] = dec
+        p["radius"] = radius if radius is not None else 30.0
     if oid:
         p["oid"] = oid
     return p
@@ -101,10 +142,16 @@ async def get_objects_list(
     *,
     survey: str,
     classifier: str | None = None,
+    classifier_version: str | None = None,
     class_name: str | None = None,
     probability: float | None = None,
     n_det_min: int | None = None,
     n_det_max: int | None = None,
+    firstmjd_min: float | None = None,
+    firstmjd_max: float | None = None,
+    ra: float | None = None,
+    dec: float | None = None,
+    radius: float | None = None,
     oid: str | None = None,
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
@@ -112,10 +159,16 @@ async def get_objects_list(
     params = build_search_params(
         survey=survey,
         classifier=classifier,
+        classifier_version=classifier_version,
         class_name=class_name,
         probability=probability,
         n_det_min=n_det_min,
         n_det_max=n_det_max,
+        firstmjd_min=firstmjd_min,
+        firstmjd_max=firstmjd_max,
+        ra=ra,
+        dec=dec,
+        radius=radius,
         oid=oid,
         page=page,
         page_size=page_size,
