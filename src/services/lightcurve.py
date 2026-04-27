@@ -246,26 +246,63 @@ async def _fetch_features_bundle(
 
 
 async def get_lightcurve(*, survey: str, oid: str) -> dict[str, Any]:
+    """Detections-only LC fetch. The synchronous render path of the LC
+    panel: just enough data to draw the diff-mode chart immediately. FP,
+    features (Fold + parametric overlays), and object_info ride deferred
+    /htmx/lc_* endpoints and update the chart in place when they arrive.
+    """
     cfg = SC(survey)
-    fp_url = cfg.fp_url(oid) if cfg.has_forced_phot else None
-    features_url = cfg.features_url(oid)
-    raw, fp_resp, bundle = await asyncio.gather(
-        alerce_client._get(cfg.lightcurve_url(oid)),
-        _fetch_fp(fp_url),
-        _fetch_features_bundle(features_url, survey=survey),
-    )
-    period, fits = bundle
+    raw = await alerce_client._get(cfg.lightcurve_url(oid))
     if not isinstance(raw, dict):
         raise ValueError(f"Unexpected lightcurve response shape: {type(raw).__name__}")
-    # ZTF only: pull mag_corr/e_mag_corr from v2 into v1 so sci-mode error
-    # bars aren't defeated by v1's sigmapsf_corr=100 sentinel.
+    return shape_lightcurve(raw, survey=survey)
+
+
+async def get_lc_fp_bundle(*, survey: str, oid: str) -> dict[str, Any] | None:
+    """Deferred FP fetch — returns a fresh `shape_lightcurve` payload that
+    *also* re-merges v2 mag_corr into v1 detections (ZTF sci-mode error
+    bars need this; the synchronous render skips it). The client replaces
+    `bands` AND `fpBands` together so detections + FP stay self-consistent.
+
+    Costs an extra LC fetch on top of FP, but they run in parallel so
+    wall-clock is `max(LC, FP)` — same as the old all-in-one. None when
+    the survey has no FP endpoint (LSST today still does, ZTF too).
+    """
+    cfg = SC(survey)
+    fp_url = cfg.fp_url(oid) if cfg.has_forced_phot else None
+    if fp_url is None:
+        return None
+    raw, fp_resp = await asyncio.gather(
+        alerce_client._get(cfg.lightcurve_url(oid)),
+        _fetch_fp(fp_url),
+        return_exceptions=True,
+    )
+    if isinstance(raw, Exception):
+        raise raw
+    if isinstance(fp_resp, Exception):
+        fp_resp = None
+    if not isinstance(raw, dict):
+        raise ValueError(f"Unexpected lightcurve response shape: {type(raw).__name__}")
     if survey == "ztf" and isinstance(raw.get("detections"), list):
         raw["detections"] = _merge_ztf_v2_corr(raw["detections"], fp_resp)
     fp_raw = _extract_fp(fp_resp, survey)
-    return shape_lightcurve(
-        raw,
-        survey=survey,
-        fp_raw=fp_raw,
-        multiband_period=period,
-        parametric_fits=fits,
-    )
+    return shape_lightcurve(raw, survey=survey, fp_raw=fp_raw)
+
+
+async def get_lc_features_bundle(
+    *, survey: str, oid: str
+) -> dict[str, Any]:
+    """Deferred features fetch — `Multiband_period` (drives the Fold button
+    + the periodogram pipeline-period reference line) and the parametric-
+    fit bundle (drives the overlay picker). Both pull from `pick_default_
+    version` so they can't drift apart from the features-table modal.
+
+    Returns `{multiband_period, parametric_fits}` with both empty when the
+    features endpoint isn't configured (LSST) or the upstream call fails.
+    """
+    cfg = SC(survey)
+    url = cfg.features_url(oid)
+    if url is None:
+        return {"multiband_period": None, "parametric_fits": {}}
+    period, fits = await _fetch_features_bundle(url, survey=survey)
+    return {"multiband_period": period, "parametric_fits": fits}

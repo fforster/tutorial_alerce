@@ -301,9 +301,9 @@ def test_search_form_prefills_all_filters(client, stub_services):
     assert r.status_code == 200
     # Free-text OID list is pre-populated.
     assert 'value="OID1,OID2"' in r.text
-    # Probability slider shows the value (and the numeric readout span).
+    # Min-probability input carries the value (replaces the old slider; the
+    # readout span the slider used is gone).
     assert 'value="0.42"' in r.text
-    assert ">0.42<" in r.text
     # Min/max detection inputs carry the integers.
     assert 'value="5"' in r.text
     assert 'value="50"' in r.text
@@ -420,6 +420,11 @@ def test_detail_renders_container(client):
     # global header's #detail-nav-bar visibility.
     assert 'data-oid="ZTF21abc"' in r.text
     assert 'data-survey-id="ztf"' in r.text
+    # Periodogram panel ships inline (hidden) inside the same grid cell as
+    # the position-residuals panel; the LC toolbar's button toggles them.
+    assert 'id="periodogram-slot"' in r.text
+    assert 'data-pg-panel' in r.text
+    assert 'data-lc-target="lc-canvas-ZTF21abc"' in r.text
     # The Back button + prev/next arrows used to live in this fragment but
     # were promoted to the global header (#detail-nav-bar in index.html.jinja)
     # so the detail panels reclaim that row of vertical space.
@@ -503,10 +508,12 @@ def test_object_information_hides_features_button_for_lsst(client, monkeypatch):
     assert 'hx-target="#features-modal"' not in r.text
 
 
-def test_object_information_renders_tns_block_when_match(client, monkeypatch):
-    """Positive-path for the TNS strip: when the ALeRCE bridge returns a
-    match, the panel should expose class/name/redshift and a link to the
-    TNS object page."""
+def test_object_information_renders_tns_placeholder(client, monkeypatch):
+    """The basic-info template no longer renders the TNS strip inline
+    (the bridge is too slow — used to block this whole panel for ~12 s).
+    It now renders a placeholder div that hx-gets /htmx/tns_lookup on
+    load; the deferred response fills it in via innerHTML when (and if)
+    the cone-search returns a match."""
     async def fake_info(*, survey, oid):
         return {
             "oid": oid, "survey": survey,
@@ -520,6 +527,24 @@ def test_object_information_renders_tns_block_when_match(client, monkeypatch):
             "archives": [],
         }
 
+    monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
+    r = client.get("/htmx/object_information?oid=ZTF25twl&survey_id=ztf")
+    assert r.status_code == 200
+    # Placeholder is wired with hx-get to the deferred TNS endpoint and
+    # carries the ra/dec the cone-search needs.
+    assert 'id="basic-info-tns"' in r.text
+    assert "/htmx/tns_lookup" in r.text
+    assert "oid=ZTF25twl" in r.text
+    assert "ra=353.977" in r.text
+    assert "dec=47.076" in r.text
+    # Inline TNS strip is no longer rendered in the synchronous response.
+    assert "tns-block" not in r.text
+
+
+def test_tns_lookup_renders_strip_on_match(client, monkeypatch):
+    """The deferred /htmx/tns_lookup endpoint returns the styled TNS strip
+    when the ALeRCE bridge finds a match, plus an inline script that
+    auto-populates `#lc-redshift-{oid}` if the report carries a redshift."""
     async def fake_tns(*, ra, dec):
         return {
             "type": "SN Ia",
@@ -528,38 +553,50 @@ def test_object_information_renders_tns_block_when_match(client, monkeypatch):
             "url": "https://www.wis-tns.org/object/2025twl",
         }
 
-    monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
     monkeypatch.setattr("src.routes.htmx.tns_service.get_tns_info", fake_tns)
-    r = client.get("/htmx/object_information?oid=ZTF25twl&survey_id=ztf")
+    r = client.get("/htmx/tns_lookup?oid=ZTF25twl&ra=353.977&dec=47.076")
     assert r.status_code == 200
+    assert "tns-block" in r.text
     assert "SN Ia" in r.text
     assert "2025twl" in r.text
     assert "0.0430" in r.text
     assert "https://www.wis-tns.org/object/2025twl" in r.text
-    # Marker class for the compact one-line strip — also the thing the
-    # negative-path test keys on, so the two assertions stay symmetric.
-    assert "tns-block" in r.text
+    # Inline script for LC redshift autopop — keys off the per-oid input id.
+    assert 'getElementById("lc-redshift-ZTF25twl")' in r.text
 
 
-def test_object_information_no_tns_block_when_no_match(client, monkeypatch):
-    """Autouse fixture returns None by default; make sure the template omits
-    the TNS block entirely rather than showing an empty "TNS" header."""
+def test_tns_lookup_returns_empty_on_no_match(client, monkeypatch):
+    """No match → empty body, so the basic-info placeholder stays empty
+    (no border, no header, no "no TNS match" noise)."""
+    async def fake_tns(*, ra, dec):
+        return None
+
+    monkeypatch.setattr("src.routes.htmx.tns_service.get_tns_info", fake_tns)
+    r = client.get("/htmx/tns_lookup?oid=ZTF25twl&ra=10.0&dec=20.0")
+    assert r.status_code == 200
+    assert "tns-block" not in r.text
+    assert 'getElementById("lc-redshift' not in r.text
+
+
+def test_object_information_skips_tns_placeholder_without_coords(client, monkeypatch):
+    """LSST objects sometimes lack ra/dec; the deferred TNS placeholder
+    shouldn't render in that case — the TNS bridge needs coords for its
+    cone-search, and an unwired placeholder would just spin forever."""
     async def fake_info(*, survey, oid):
         return {
-            "oid": oid, "survey": survey, "ra": 1.0, "dec": 2.0,
-            "ra_hms": "00:04:00.000", "dec_dms": "+02:00:00.00",
-            "l_gal": 109.8, "b_gal": -60.0,
-            "lambda_ecl": 1.8, "beta_ecl": 1.5,
+            "oid": oid, "survey": survey, "ra": None, "dec": None,
+            "ra_hms": None, "dec_dms": None,
+            "l_gal": None, "b_gal": None,
+            "lambda_ecl": None, "beta_ecl": None,
             "firstmjd": 60000.0, "lastmjd": 60001.0, "delta_mjd": 1.0,
             "n_det": 1, "n_non_det": 0, "n_forced": None,
             "corrected": None, "stellar": None, "archives": [],
         }
 
     monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
-    r = client.get("/htmx/object_information?oid=x&survey_id=ztf")
+    r = client.get("/htmx/object_information?oid=x&survey_id=lsst")
     assert r.status_code == 200
-    # The block has a unique `.tns-block` marker class; the hover help also
-    # contains the word "TNS", so keying on the class avoids false positives.
+    assert 'id="basic-info-tns"' not in r.text
     assert "tns-block" not in r.text
 
 
@@ -698,55 +735,111 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
     assert 'class="lc-dered-toggle' in r.text
     assert 'data-lc-dered="obs"' in r.text
     assert 'id="lc-ebv-ZTF21abc"' in r.text
-    # ra/dec propagated to the canvas for the client-side dust lookup; R_λ
-    # per-band map comes from SurveyConfig (ZTF: g, r, i).
-    assert 'data-ra="150.0"' in r.text
-    assert 'data-dec="30.0"' in r.text
+    # ra/dec are NOT server-rendered anymore — they arrive via deferred
+    # /htmx/lc_info and `lcSetCoords` stamps them onto the canvas at runtime.
+    # R_λ per-band map still comes from SurveyConfig.
+    assert "data-ra=" not in r.text
+    assert "data-dec=" not in r.text
     assert "data-ext-r=" in r.text
     assert "3.237" in r.text  # R_g for ZTF/LSST
     # CSV download button + per-chart data-oid it uses for the filename.
     assert 'class="lc-download-btn' in r.text
     assert 'data-oid="ZTF21abc"' in r.text
-    # No TNS match in this test (autouse fixture stubs to None) ⇒ the z input
-    # must NOT be pre-filled. Guarantees we never silently assume a redshift.
+    # Periodogram toggle in the LC toolbar wires to togglePeriodogramPanel.
+    assert 'class="lc-periodogram-btn' in r.text
+    assert "togglePeriodogramPanel('lc-canvas-ZTF21abc')" in r.text
+    # The z input is NEVER pre-filled server-side now — TNS redshift arrives
+    # via the deferred /htmx/tns_lookup fragment and is set in DOM by the
+    # inline script there.
     assert 'id="lc-redshift-ZTF21abc"' in r.text
     assert "value=" not in (
         r.text.split('id="lc-redshift-ZTF21abc"')[1].split(">", 1)[0]
     )
+    # Loading status strip reveals the three deferred fetches the panel
+    # depends on (FP, features, coords).
+    assert "/htmx/lc_fp?oid=ZTF21abc" in r.text
+    assert "/htmx/lc_features?oid=ZTF21abc" in r.text
+    assert "/htmx/lc_info?oid=ZTF21abc" in r.text
 
 
-def test_lightcurve_prefills_z_from_tns(client, monkeypatch):
-    """When TNS reports a redshift for this position, the z input renders
-    with `value="..."` so the JS picks it up on first sync — confirmed
-    upstream value is the only non-user source of redshift the LC accepts."""
-    async def fake_lc(*, survey, oid):
+def test_lc_fp_endpoint_returns_inline_setBundle(client, monkeypatch):
+    """Deferred FP endpoint hands the freshly re-shaped bundle to
+    `lcSetBundle` so the chart picks up FP + the v2 mag_corr-merged
+    detections in place."""
+    async def fake_bundle(*, survey, oid):
         return {
             "survey": survey,
-            "bands": [{"name": "g", "points": [{
-                "mjd": 60000.0, "flux": 1000.0, "e_flux": 10.0,
+            "bands": [{"name": "g", "points": []}],
+            "forced_phot_bands": [{"name": "g", "points": [{
+                "mjd": 59999.0, "flux": 50.0, "e_flux": 8.0,
                 "sci_flux": None, "e_sci_flux": None,
-                "identifier": "1", "has_stamp": False,
+                "identifier": None, "has_stamp": False,
             }]}],
-            "forced_phot_bands": [],
-            "n_det": 1, "n_fp": 0, "has_science_flux": True,
+            "n_det": 0, "n_fp": 1, "has_science_flux": True,
         }
 
-    async def fake_info(*, survey, oid):
-        return {"ra": 100.0, "dec": -20.0}
-
-    async def fake_tns(*, ra, dec):
-        return {"type": "SN Ia", "name": "2025abc",
-                "redshift": 0.087, "url": "https://www.wis-tns.org/object/2025abc"}
-
-    monkeypatch.setattr("src.routes.htmx.lightcurve_service.get_lightcurve", fake_lc)
-    monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
-    monkeypatch.setattr("src.routes.htmx.tns_service.get_tns_info", fake_tns)
-    r = client.get("/htmx/lightcurve?oid=ZTF21xyz&survey_id=ztf")
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lc_fp_bundle", fake_bundle,
+    )
+    r = client.get("/htmx/lc_fp?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
-    # The TNS redshift lands on the input as a server-rendered value attr.
-    assert 'id="lc-redshift-ZTF21xyz"' in r.text
-    z_input = r.text.split('id="lc-redshift-ZTF21xyz"')[1].split(">", 1)[0]
-    assert 'value="0.087"' in z_input
+    assert "window.lcSetBundle" in r.text
+    assert '"lc-canvas-ZTF21abc"' in r.text
+    assert "forced_phot_bands" in r.text
+
+
+def test_lc_features_endpoint_returns_inline_setFeatures(client, monkeypatch):
+    """Deferred features endpoint hands `multiband_period` + parametric_fits
+    to `lcSetFeatures` so the Fold button and overlay picker can reveal
+    themselves with the right data."""
+    async def fake_bundle(*, survey, oid):
+        return {
+            "multiband_period": 3.14159,
+            "parametric_fits": {
+                "spm": {"g": {"A": 0.5, "beta": 0.3, "t0": 5.0,
+                              "gamma": 2.0, "tau_rise": 1.0, "tau_fall": 10.0}},
+            },
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lc_features_bundle", fake_bundle,
+    )
+    r = client.get("/htmx/lc_features?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "window.lcSetFeatures" in r.text
+    assert "3.14159" in r.text
+    assert '"spm"' in r.text
+
+
+def test_lc_info_endpoint_returns_inline_setCoords(client, monkeypatch):
+    """Deferred info endpoint hands ra/dec to `lcSetCoords`, which reveals
+    the ZTF DR control + kicks off the dust-proxy fetch."""
+    async def fake_info(*, survey, oid):
+        return {"ra": 212.8, "dec": -3.5}
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
+    )
+    r = client.get("/htmx/lc_info?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "window.lcSetCoords" in r.text
+    assert "212.8" in r.text
+    assert "-3.5" in r.text
+
+
+def test_lc_info_endpoint_handles_missing_coords(client, monkeypatch):
+    """When object_info has no coords (or fails outright), the fragment
+    still consumes the placeholder spinner — just doesn't try to call
+    lcSetCoords with non-finite values."""
+    async def fake_info(*, survey, oid):
+        return {"ra": None, "dec": None}
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
+    )
+    r = client.get("/htmx/lc_info?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "window.lcSetCoords" not in r.text
 
 
 def test_lightcurve_empty_shows_message(client, monkeypatch):
@@ -836,8 +929,11 @@ def test_lightcurve_upstream_error_renders_message(client, monkeypatch):
     assert "Upstream error" in r.text
 
 
-def test_lightcurve_renders_even_when_object_info_fails(client, monkeypatch):
-    """If the ra/dec lookup fails the panel still renders, sans auto E(B-V)."""
+def test_lightcurve_synchronous_render_does_not_call_object_info(client, monkeypatch):
+    """The synchronous LC route is detections-only now — no object_info,
+    no FP, no features, no TNS. ra/dec ride the deferred /htmx/lc_info
+    fragment instead. Guards against re-introducing the slow blocking
+    fetches that used to push the panel to 15 s per object."""
     async def fake_lc(*, survey, oid):
         return {
             "survey": survey,
@@ -850,24 +946,25 @@ def test_lightcurve_renders_even_when_object_info_fails(client, monkeypatch):
             "n_det": 1, "n_fp": 0, "has_science_flux": True,
         }
 
+    info_calls = 0
+
     async def fake_info(*, survey, oid):
-        raise RuntimeError("object_api down")
+        nonlocal info_calls
+        info_calls += 1
+        return {"ra": 1.0, "dec": 2.0}
 
     monkeypatch.setattr(
-        "src.routes.htmx.lightcurve_service.get_lightcurve",
-        fake_lc,
+        "src.routes.htmx.lightcurve_service.get_lightcurve", fake_lc,
     )
     monkeypatch.setattr(
-        "src.routes.htmx.object_info_service.get_object_info",
-        fake_info,
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
     )
     r = client.get("/htmx/lightcurve?oid=x&survey_id=lsst")
     assert r.status_code == 200
     assert 'id="lc-canvas-x"' in r.text
-    # Without ra/dec the canvas doesn't carry the dust-fetch hints, but the
-    # E(B-V) input and R_λ map are still there so manual override works.
-    assert "data-ra=" not in r.text
-    assert "data-dec=" not in r.text
+    # Synchronous path doesn't hit object_info anymore.
+    assert info_calls == 0
+    # E(B-V) input + R_λ map are still there so manual override works.
     assert "data-ext-r=" in r.text
     assert 'id="lc-ebv-x"' in r.text
 
@@ -902,79 +999,47 @@ def _stub_lc_and_info(
     monkeypatch.setattr("src.routes.htmx.object_info_service.get_object_info", fake_info)
 
 
-def test_lightcurve_ztf_shows_dr_button_with_coords(client, monkeypatch):
+def test_lightcurve_ztf_dr_button_renders_hidden_initially(client, monkeypatch):
+    """ZTF DR is now ALWAYS rendered (hidden initially). The deferred
+    /htmx/lc_info fragment calls `lcSetCoords` to stamp data-ra/data-dec
+    and reveal the wrap. Keeps the synchronous LC route from blocking on
+    object_info just to decide whether to render this control."""
     _stub_lc_and_info(monkeypatch, ra=212.8182939, dec=-3.5206587)
     r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
     assert 'class="lc-dr-toggle' in r.text
     assert 'data-target="lc-canvas-ZTF21abc"' in r.text
     assert 'data-lc-dr="off"' in r.text
-    assert 'data-ra="212.8182939"' in r.text
-    assert 'data-dec="-3.5206587"' in r.text
-    # Alpha slider ships alongside the button, starts hidden, and targets
-    # the same canvas so the JS binder can pair them.
+    # Wrapper carries the tw-hidden class until coords arrive.
+    assert 'id="lc-dr-wrap-ZTF21abc"' in r.text
+    assert "lc-dr-wrap" in r.text
+    assert "tw-hidden" in r.text
+    # data-ra/data-dec are stamped at runtime by lcSetCoords, not the server.
+    assert 'data-ra="212.8182939"' not in r.text
+    assert 'data-dec="-3.5206587"' not in r.text
+    # Alpha slider ships alongside, starts hidden.
     assert 'class="lc-dr-alpha tw-hidden"' in r.text
-    assert 'type="range"' in r.text
-    assert 'orient="vertical"' in r.text
 
 
-def test_lightcurve_lsst_also_shows_dr_button(client, monkeypatch):
-    """DR is a positional cone-search (ra/dec + radius), so LSST objects can
-    still have a ZTF DR archival crossmatch worth showing."""
-    _stub_lc_and_info(monkeypatch, has_science_flux=False, ra=10.0, dec=-20.0)
-    r = client.get("/htmx/lightcurve?oid=x&survey_id=lsst")
-    assert r.status_code == 200
-    assert 'class="lc-dr-toggle' in r.text
-    assert 'data-ra="10.0"' in r.text
-    assert 'data-dec="-20.0"' in r.text
-
-
-def test_lightcurve_without_coords_hides_dr_button(client, monkeypatch):
-    """DR needs ra/dec to cone-search; skip the button if the object_info call
-    didn't yield usable coordinates."""
-    _stub_lc_and_info(monkeypatch, ra=None, dec=None)
+def test_lightcurve_overlay_picker_renders_hidden_initially(client, monkeypatch):
+    """Overlay picker is now ALWAYS rendered (hidden + all options
+    disabled). The deferred /htmx/lc_features fragment calls
+    `lcSetFeatures`, which un-disables the options the object actually
+    has and removes tw-hidden."""
+    _stub_lc_and_info(monkeypatch)
     r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
-    assert "lc-dr-toggle" not in r.text
-
-
-def test_lightcurve_renders_overlay_select_when_fits_present(client, monkeypatch):
-    """When the features endpoint carried SPM / FLEET / TDE params, the
-    overlay picker appears with options that match what the bundle supplied;
-    options without data stay in the select but are disabled."""
-    _stub_lc_and_info(
-        monkeypatch,
-        parametric_fits={
-            "spm": {"g": {"A": 0.5, "beta": 0.3, "t0": 5.0, "gamma": 2.0,
-                          "tau_rise": 1.0, "tau_fall": 10.0}},
-            # FLEET intentionally omitted for this object.
-        },
-    )
-    r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
-    assert r.status_code == 200
-    # Select is rendered and keyed off the same canvas id as the other
-    # toggles, so the JS binder can pair them.
     assert 'class="lc-overlay-select' in r.text
-    assert 'data-target="lc-canvas-ZTF21abc"' in r.text
     assert 'id="lc-overlay-ZTF21abc"' in r.text
-    # SPM option active; FLEET + TDE present but disabled (so the user can
-    # see they exist as features but have no data on this object).
-    assert '<option value="spm">SPM</option>' in r.text
+    assert 'id="lc-overlay-wrap-ZTF21abc"' in r.text
+    # All non-"none" options start disabled — `lcSetFeatures` opens up
+    # whichever fits the object actually has.
+    assert 'value="spm" disabled' in r.text
     assert 'value="fleet" disabled' in r.text
     assert 'value="tde" disabled' in r.text
-    # Info strip slot is rendered (filled by JS when an overlay is selected).
+    # Info strip is unconditionally present so `lcSetFeatures` can populate
+    # it once the user picks an overlay.
     assert 'id="lc-overlay-info-ZTF21abc"' in r.text
-
-
-def test_lightcurve_hides_overlay_when_no_parametric_fits(client, monkeypatch):
-    """LSST (no features endpoint) and unfitted ZTF objects return an empty
-    parametric_fits dict; the dropdown must not render at all rather than
-    showing an all-disabled placeholder."""
-    _stub_lc_and_info(monkeypatch, parametric_fits={})
-    r = client.get("/htmx/lightcurve?oid=ZTF21abc&survey_id=ztf")
-    assert r.status_code == 200
-    assert "lc-overlay-select" not in r.text
-    assert "lc-overlay-info-ZTF21abc" not in r.text
 
 
 def test_api_ztf_dr_proxies_service(client, monkeypatch):

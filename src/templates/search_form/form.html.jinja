@@ -172,14 +172,8 @@
   </script>
 
   <div>
-    <label class="tw-text-xs tw-text-text-secondary tw-block">
-      Probability ≥ <span id="prob_number" class="mono">{{ "%.2f"|format(selected_probability or 0) }}</span>
-    </label>
-    <input
-      id="prob_range" type="range" step="0.01" min="0" max="1" value="{{ selected_probability or 0 }}"
-      class="tw-w-full"
-      oninput="document.getElementById('prob_number').textContent = parseFloat(this.value).toFixed(2)"
-    />
+    <label class="tw-text-xs tw-text-text-secondary tw-block tw-mb-1" for="min_probability">Min probability</label>
+    {{ customInput(id="min_probability", type="number", placeholder="0–1", value=selected_probability if (selected_probability is not none and selected_probability > 0) else "", text_size="tw-text-xs") }}
   </div>
 
   <div>

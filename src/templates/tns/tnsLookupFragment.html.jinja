@@ -1,0 +1,36 @@
+{#
+  Deferred TNS fragment — returned by /htmx/tns_lookup.
+
+  Replaces the basic-info TNS placeholder (innerHTML swap on
+  `#basic-info-tns`). When the cone-search returns a match we render the
+  one-line TNS strip; when it doesn't, we render nothing so the placeholder
+  stays empty (no border, no "no TNS match" noise).
+
+  Side effect: if the report carries a positive redshift AND the LC panel
+  is in the DOM (its z input id is `lc-redshift-{oid}`), populate the input
+  in place. Falls through cleanly when the LC panel hasn't rendered yet.
+#}
+{% if tns %}
+<div class="tns-block tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-text-xs tw-flex tw-items-baseline tw-gap-x-2 tw-gap-y-1 tw-flex-wrap">
+  <span class="tw-text-text-secondary tw-uppercase">TNS</span>
+  {% if tns.type %}<span class="mono">{{ tns.type }}</span>{% endif %}
+  <a href="{{ tns.url }}" target="_blank" rel="noopener"
+     class="mono tw-text-accent hover:tw-text-text-primary tw-underline tw-decoration-dotted"
+     title="Open TNS object page (discovery / classification reporters)">{{ tns.name }}</a>
+  {% if tns.redshift is not none %}<span class="mono"><span class="tw-text-text-secondary">z</span> {{ "%.4f"|format(tns.redshift) }}</span>{% endif %}
+</div>
+{% if tns.redshift is not none and tns.redshift > 0 %}
+<script>
+(function () {
+  // Auto-populate the LC redshift input if the panel is in the DOM and
+  // the user hasn't already typed a value. Dispatching `input` fires the
+  // chart's existing handler so the App↔Abs toggle re-projects.
+  const inp = document.getElementById("lc-redshift-{{ oid }}");
+  if (!inp) return;
+  if (inp.value && inp.value.length > 0) return;
+  inp.value = "{{ tns.redshift }}";
+  inp.dispatchEvent(new Event("input", { bubbles: true }));
+})();
+</script>
+{% endif %}
+{% endif %}

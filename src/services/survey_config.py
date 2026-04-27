@@ -132,7 +132,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
             "?survey_id=lsst&oid={oid}"
         ),
         bands=("u", "g", "r", "i", "z", "y"),
-        default_classifier="lc_classifier_top",
+        default_classifier="stamp_classifier_rubin_beta_20260421",
         has_forced_phot=True,
         has_science_flux=True,
         extinction_r={
@@ -161,7 +161,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
         prob_url_template="https://api.alerce.online/ztf/v1/objects/{oid}/probabilities",
         features_url_template="https://api.alerce.online/ztf/v1/objects/{oid}/features",
         bands=("g", "r", "i"),
-        default_classifier="lc_classifier",
+        default_classifier="lc_classifier_BHRF_forced_phot",
         has_forced_phot=True,
         has_science_flux=True,
         extinction_r={"g": 3.237, "r": 2.273, "i": 1.684},

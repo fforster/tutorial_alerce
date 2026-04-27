@@ -1,0 +1,20 @@
+{#
+  Deferred object_info fragment — returned by /htmx/lc_info.
+
+  Supplies ra/dec to the LC panel (drives the IRSA dust proxy and reveals
+  the ZTF DR archival-photometry button). `lcSetCoords` writes data-ra /
+  data-dec onto both the canvas and the ZTF DR button, then triggers the
+  same dust fetch the original synchronous render did.
+#}
+{% if ra is not none and dec is not none %}
+<span class="tw-text-text-muted">coords&nbsp;✓</span>
+<script>
+(function () {
+  if (window.lcSetCoords) {
+    window.lcSetCoords("lc-canvas-{{ oid }}", {{ ra|tojson_compact|safe }}, {{ dec|tojson_compact|safe }});
+  }
+})();
+</script>
+{% else %}
+<span class="tw-text-text-muted">coords&nbsp;—</span>
+{% endif %}

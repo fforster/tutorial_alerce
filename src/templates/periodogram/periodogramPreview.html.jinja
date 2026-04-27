@@ -1,0 +1,126 @@
+{#
+  Periodogram panel — toggled into the coord-residuals slot by the LC
+  toolbar's "Periodogram" button. Reads (MJD, flux, eflux) from the live
+  light-curve chart via window.lcGetChart; "Apply"/peak-click drives the
+  *main* LC chart's fold state via window.lcSetFoldPeriod (so there is
+  only ever one folded view of the data — the main chart itself).
+
+  Static markup: no server-side render of state needed; periodogram.js
+  binds via the data-pg-* attributes on this `[data-pg-panel]` root.
+#}
+<div
+  data-pg-panel
+  data-lc-target="lc-canvas-{{ oid }}"
+  data-flux-type="sci_mag"
+  class="tw-h-full tw-flex tw-flex-col tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-3 tw-text-xs tw-min-h-0"
+>
+  <div class="tw-flex tw-items-center tw-justify-between tw-mb-2">
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Periodogram", side="right") %}
+      <div class="tw-font-semibold tw-mb-1">Computing</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">Min P / Max P</strong> — period bounds in days. The frequency grid is set to <span class="mono">df = 1/(oversample · T)</span> (Rayleigh-spaced).</li>
+        <li><strong class="tw-text-text-primary">Over</strong> — oversampling factor (5 fast, 10 thorough); higher catches narrow peaks at proportionally higher compute cost.</li>
+        <li><strong class="tw-text-text-primary">Diff flux / Sci flux / Sci mag</strong> — input domain. <em>Sci mag</em> (AB, ZP 31.4) is usually best for variable stars; <em>Diff flux</em> for transients.</li>
+        <li>This is a <strong class="tw-text-text-primary">multi-band, multi-harmonic LS periodogram</strong> (Schwarzenberg-Czerny 1996; same family as P4J's MHAOV on the production pipeline). At each frequency we jointly fit an NH=4 harmonic Fourier model per band (own constant + own a<sub>k</sub>, b<sub>k</sub> for k=1…4) by weighted least squares, and sum χ² reductions across bands. Bands don't share phase, and harmonics must lock to the same fundamental — which is what breaks yearly window-function aliases that fool the simpler "sum of single-sinusoid power at f, 2f, …" heuristic.</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Selecting</div>
+      <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>Click a peak (or anywhere on the curve) to fold the main light curve at that period.</li>
+        <li><strong class="tw-text-text-primary">×2 / ÷2</strong> — useful for eclipsing binaries (true period is 2× the GLS peak).</li>
+        <li><strong class="tw-text-text-primary">Unfold</strong> — return the main LC to MJD axis.</li>
+        <li>Score is the joint multi-harmonic χ² reduction (per-band, summed), normalized — peaks at the true fundamental because all harmonics have to phase-lock together.</li>
+        <li>Reference lines: <strong class="tw-text-red-400">red dashed</strong> = currently selected period; <strong class="tw-text-yellow-500">amber dotted "Pipeline"</strong> = <span class="mono">Multiband_period</span> from the ZTF feature table (if available).</li>
+      </ul>
+    {% endcall %}
+    <button
+      type="button"
+      class="tw-text-text-muted hover:tw-text-text-primary tw-text-base tw-leading-none tw-px-2"
+      onclick="window.togglePeriodogramPanel('lc-canvas-{{ oid }}')"
+      title="Close periodogram (re-shows position residuals)."
+      aria-label="Close periodogram"
+    >×</button>
+  </div>
+
+  {# Compute row: bounds, oversample, source flux, status. #}
+  <div class="tw-flex tw-flex-wrap tw-items-center tw-gap-1.5 tw-text-[11px] tw-mb-2">
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Lower period bound (days). Sets the upper end of the frequency search grid (1/Min P).">
+      Min P
+      <input data-pg-min type="number" value="0.1" step="0.1" min="0.01"
+        class="tw-w-12 tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+        title="Lower period bound (days). Sets the upper end of the frequency search grid (1/Min P)." />
+    </label>
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Upper period bound (days). Sets the lower end of the frequency search grid (1/Max P). Cap below the time baseline T — periods longer than T can't be detected.">
+      Max P
+      <input data-pg-max type="number" value="100" step="1" min="1"
+        class="tw-w-14 tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+        title="Upper period bound (days). Sets the lower end of the frequency search grid (1/Max P). Cap below the time baseline T — periods longer than T can't be detected." />
+    </label>
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Frequency-grid oversampling factor. df = 1/(oversample · T) — higher values catch narrow peaks at proportionally higher compute cost. 5 = fast, 10 = thorough.">
+      Over
+      <input data-pg-oversample type="number" value="5" step="1" min="1" max="50"
+        class="tw-w-10 tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+        title="Frequency-grid oversampling factor. df = 1/(oversample · T) — higher values catch narrow peaks at proportionally higher compute cost. 5 = fast, 10 = thorough." />
+    </label>
+    <button
+      type="button"
+      data-pg-compute
+      class="tw-px-2 tw-py-0.5 tw-bg-accent tw-text-bg-primary tw-rounded tw-font-medium hover:tw-bg-accent-hover"
+      title="Run the multi-band GLS over [Min P, Max P]. The best peak is auto-selected and the main light curve is folded at that period."
+    >Compute</button>
+    <button
+      type="button"
+      data-pg-flux-toggle
+      class="tw-px-1.5 tw-py-0.5 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary tw-min-w-[72px]"
+      title="Cycle the multi-band GLS input: Diff flux → Sci flux → Sci mag. At each frequency a separate sinusoid is fit per band (own amplitude + phase) and the per-band χ² reductions are summed."
+    >Sci mag</button>
+    <span data-pg-status class="tw-text-text-muted tw-font-mono tw-text-[10px] tw-truncate"
+      title="Compute progress and final summary (number of frequencies, points, bands, input mode)."></span>
+  </div>
+
+  {# Periodogram canvas — flex-1 so it grows to fill the slot height. #}
+  <div class="tw-relative tw-flex-1 tw-min-h-[10rem]"
+    title="Multi-harmonic GLS score vs. period (log axis). Red ✕ = top peaks. Click anywhere to fold the main light curve at that period. Wheel to zoom, shift-drag to box-zoom, ctrl-drag to pan, double-click to reset.">
+    <canvas class="periodogram-canvas tw-w-full tw-h-full"></canvas>
+  </div>
+
+  {# Period-selection row: manual entry + ×2/÷2/Unfold + readout. #}
+  <div class="tw-flex tw-flex-wrap tw-items-center tw-gap-1.5 tw-text-[11px] tw-mt-2">
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Manual period entry (days). Type a value and press Enter (or hit Apply) to fold at that period. Auto-filled when you click a peak.">
+      P (d)
+      <input data-pg-period type="number" step="any" min="0.001" placeholder="manual"
+        class="tw-w-32 tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
+        title="Manual period entry (days). Type a value and press Enter (or hit Apply) to fold at that period. Auto-filled when you click a peak." />
+    </label>
+    <button
+      type="button"
+      data-pg-apply
+      class="tw-px-1.5 tw-py-0.5 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+      title="Apply the value in P (d) to fold the main light curve at that period."
+    >Apply</button>
+    <button
+      type="button"
+      data-pg-double
+      class="tw-px-1.5 tw-py-0.5 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-text-text-primary"
+      title="Double the currently selected period and re-fold. Useful for eclipsing binaries — the GLS often picks half the true period because primary and secondary eclipses look similar."
+    >×2</button>
+    <button
+      type="button"
+      data-pg-half
+      class="tw-px-1.5 tw-py-0.5 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-text-text-primary"
+      title="Halve the currently selected period and re-fold."
+    >÷2</button>
+    <button
+      type="button"
+      data-pg-unfold
+      class="tw-px-1.5 tw-py-0.5 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-text-text-primary"
+      title="Return the main light curve to its MJD axis (cancel folding)."
+    >Unfold</button>
+    <span data-pg-display class="tw-text-accent tw-font-mono tw-text-[10px]"
+      title="The currently selected period (full precision). Updates whenever you click a peak, type into P (d), or hit ×2 / ÷2."></span>
+  </div>
+</div>

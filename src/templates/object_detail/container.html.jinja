@@ -42,15 +42,28 @@
         Loading light curve…
       </div>
     </div>
-    <div
-      id="coord-residuals-slot"
-      class="tw-col-span-1"
-      hx-get="{{ API_URL }}/htmx/coord_residuals?oid={{ oid }}&survey_id={{ survey_id }}"
-      hx-trigger="load"
-      hx-swap="innerHTML"
-    >
-      <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
-        Loading position residuals…
+    {#
+      Position residuals + periodogram share the same grid cell so
+      togglePeriodogramPanel (driven by the LC toolbar's Periodogram
+      button) flips between them without disturbing the rest of the
+      layout. The periodogram slot is hidden by default; it carries the
+      panel template inline so the canvas is ready when the toggle first
+      flips it on.
+    #}
+    <div class="tw-col-span-1 tw-min-h-0 tw-min-w-0">
+      <div
+        id="coord-residuals-slot"
+        class="tw-h-full"
+        hx-get="{{ API_URL }}/htmx/coord_residuals?oid={{ oid }}&survey_id={{ survey_id }}"
+        hx-trigger="load"
+        hx-swap="innerHTML"
+      >
+        <div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-text-xs tw-text-text-muted">
+          Loading position residuals…
+        </div>
+      </div>
+      <div id="periodogram-slot" class="tw-hidden tw-h-full">
+        {% include "periodogram/periodogramPreview.html.jinja" %}
       </div>
     </div>
 

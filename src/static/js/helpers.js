@@ -15,7 +15,7 @@ function send_form_Data() {
 
   const classifier = _val("classifier");
   const className = _val("class_name");
-  const probability = _val("prob_range");
+  const probability = _val("min_probability");
   const oidsRaw = _val("objectIds");
   const minDet = _val("min_detections");
   const maxDet = _val("max_detections");

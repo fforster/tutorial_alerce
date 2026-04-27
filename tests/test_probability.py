@@ -28,10 +28,12 @@ def test_groups_by_classifier_name_and_version():
 def test_default_key_matches_survey_primary_classifier():
     raw = [
         _row("lc_classifier_transient", "2.0", "SN", 0.5),
-        _row("lc_classifier_top", "1.0", "SN", 0.8),
+        _row("stamp_classifier_rubin_beta_20260421", "2.0.2", "SN", 0.8),
     ]
     out = shape_probability_context(raw, survey="lsst")
-    assert out["default_key"] == "lc_classifier_top v1.0"
+    # SC("lsst").default_classifier is the primary; the radar panel pins
+    # this group as the initial selection.
+    assert out["default_key"] == "stamp_classifier_rubin_beta_20260421 v2.0.2"
 
 
 def test_default_key_falls_back_to_first_when_primary_absent():

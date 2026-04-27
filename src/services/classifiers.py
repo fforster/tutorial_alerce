@@ -11,20 +11,30 @@ from typing import Any
 from . import alerce_client
 
 # Lower = earlier in the dropdown. Unknown classifiers fall back to 999.
+# The survey's `default_classifier` (in survey_config.py) should appear at
+# the top so the form's pre-selection lines up with the first dropdown
+# option a user would scan.
 _PRIORITY: dict[str, dict[str, int]] = {
     "lsst": {
-        "lc_classifier_top": 0,
-        "lc_classifier_transient": 1,
-        "lc_classifier_stochastic": 2,
-        "lc_classifier_periodic": 3,
+        "stamp_classifier_rubin_beta_20260421": 0,
+        "stamp_classifier_rubin_beta": 1,
+        "lc_classifier_top": 2,
+        "lc_classifier_transient": 3,
+        "lc_classifier_stochastic": 4,
+        "lc_classifier_periodic": 5,
     },
     "ztf": {
-        "lc_classifier": 0,
-        "lc_classifier_top": 1,
-        "lc_classifier_transient": 2,
-        "lc_classifier_stochastic": 3,
-        "lc_classifier_periodic": 4,
-        "stamp_classifier": 5,
+        "lc_classifier_BHRF_forced_phot": 0,
+        "lc_classifier_BHRF_forced_phot_top": 1,
+        "lc_classifier_BHRF_forced_phot_transient": 2,
+        "lc_classifier_BHRF_forced_phot_stochastic": 3,
+        "lc_classifier_BHRF_forced_phot_periodic": 4,
+        "lc_classifier": 5,
+        "lc_classifier_top": 6,
+        "lc_classifier_transient": 7,
+        "lc_classifier_stochastic": 8,
+        "lc_classifier_periodic": 9,
+        "stamp_classifier": 10,
     },
 }
 

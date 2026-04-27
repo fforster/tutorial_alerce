@@ -166,29 +166,24 @@
   </div>
 
   {#
-    TNS classification strip. Sourced from the ALeRCE htmx bridge
-    (api.alerce.online/.../htmx/tns/?ra&dec). Rendered only when a TNS
-    object matches the cone search — otherwise the row disappears entirely
-    rather than showing "no TNS match" noise. Fields mirror what the bridge
-    exposes: type (class), name, redshift; "Provided by TNS" link goes to
-    the TNS object page, which is where the discovery + classification
-    reporters live (the htmx bridge doesn't surface reporter names).
+    Deferred TNS placeholder. The /htmx/tns_lookup fragment fills this div
+    via innerHTML (the response includes a styled `<div class="tns-block">`
+    when there's a match, or an empty body when there isn't — keeping the
+    panel uncluttered). It also runs an inline script that auto-populates
+    `#lc-redshift-{oid}` if a positive redshift is reported AND the LC
+    panel is in the DOM (TNS is strictly additive: never blocks, never
+    invents data).
+
+    The fetch only fires when ra/dec are known — LSST objects without
+    coords skip TNS entirely, matching the prior server-side behavior.
   #}
-  {#
-    One-line TNS strip: label + Class · Name · z, with a small "via TNS" link
-    at the end. `flex-wrap` lets the row break onto a second line on narrow
-    panels instead of overflowing. Fields missing upstream are skipped
-    entirely (no "—" placeholder) so the row stays tight.
-  #}
-  {% if tns %}
-  <div class="tns-block tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-text-xs tw-flex tw-items-baseline tw-gap-x-2 tw-gap-y-1 tw-flex-wrap">
-    <span class="tw-text-text-secondary tw-uppercase">TNS</span>
-    {% if tns.type %}<span class="mono">{{ tns.type }}</span>{% endif %}
-    <a href="{{ tns.url }}" target="_blank" rel="noopener"
-       class="mono tw-text-accent hover:tw-text-text-primary tw-underline tw-decoration-dotted"
-       title="Open TNS object page (discovery / classification reporters)">{{ tns.name }}</a>
-    {% if tns.redshift is not none %}<span class="mono"><span class="tw-text-text-secondary">z</span> {{ "%.4f"|format(tns.redshift) }}</span>{% endif %}
-  </div>
+  {% if info.ra is not none and info.dec is not none %}
+  <div
+    id="basic-info-tns"
+    hx-get="{{ API_URL }}/htmx/tns_lookup?oid={{ info.oid }}&ra={{ info.ra }}&dec={{ info.dec }}"
+    hx-trigger="load"
+    hx-swap="innerHTML"
+  ></div>
   {% endif %}
 
   {#

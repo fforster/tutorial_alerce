@@ -833,14 +833,18 @@
     chart.$lcDered = restored.dered === "dered" ? "dered" : "obs";
     chart.$lcEbv = null;  // set below from input after pre-fill
     chart.$lcExtR = extR;
-    // Fold: the period lives on the Fold button's data-lc-period (rendered
-    // only when the server found a positive Multiband_period). If the button
-    // is absent, we can't honor a restored "fold" state — demote to off so
-    // applyModes doesn't try to fold without a period.
+    // Fold: the period lives on the Fold button's data-lc-period, which
+    // the deferred /htmx/lc_features fragment stamps once features arrive.
+    // On the synchronous render path we don't yet have a period (the
+    // template renders the button hidden + with empty data-lc-period), so
+    // stash the *restored* fold intent on the chart and let `lcSetFeatures`
+    // re-engage it when a positive period actually shows up.
     const foldBtn = document.querySelector(`.lc-fold-toggle[data-target="${canvas.id}"]`);
     const period = foldBtn ? parseFloat(foldBtn.dataset.lcPeriod) : NaN;
     chart.$lcPeriod = isFinite(period) && period > 0 ? period : null;
     chart.$lcFold = restored.fold === "fold" && chart.$lcPeriod ? "fold" : "off";
+    chart.$lcFoldRestoreIntent = restored.fold === "fold";
+    chart.$lcOverlayRestoreIntent = restored.overlay || null;
     // DR starts hidden + unfetched. The button loads on first click (or at
     // bind-time pre-fetch) and caches the result on the chart so re-toggling
     // doesn't refetch. drAlpha comes from restored state so the DR layer
@@ -1380,6 +1384,149 @@
     (root || document).querySelectorAll("canvas.lightcurve-canvas").forEach(initCanvas);
     initToggles(root);
   }
+
+  // Public hooks for sibling modules (periodogram.js). The LC chart owns
+  // $lcRaw/$lcFold/$lcPeriod state; these getters/setters let outside
+  // code drive the same applyModes path the in-toolbar buttons use.
+  window.lcGetChart = function (canvasOrId) {
+    const c = (typeof canvasOrId === "string")
+      ? document.getElementById(canvasOrId)
+      : canvasOrId;
+    return c ? charts.get(c) : null;
+  };
+  // Replace the chart's bands + fpBands with a freshly-shaped LC bundle
+  // (from /htmx/lc_fp). Used after the deferred FP fetch lands, since
+  // the synchronous render path serves detections-only data. The bundle
+  // must be the same shape as `data-lc` on the canvas (shape_lightcurve
+  // output). We also re-derive the buckets `applyModes` reads
+  // (raw.bands / raw.fpBands), preserving any chart state the user has
+  // toggled in the meantime (z, ebv, mode, source, fold, overlay).
+  window.lcSetBundle = function (canvasId, bundle) {
+    const canvas = document.getElementById(canvasId);
+    const chart = canvas && charts.get(canvas);
+    if (!chart || !bundle || typeof bundle !== "object") return;
+    chart.$lcRaw = {
+      bands: bundle.bands || [],
+      fpBands: bundle.forced_phot_bands || [],
+    };
+    applyModes(chart);
+  };
+
+  // Reveal + populate the Fold button and the parametric-overlay picker
+  // from the deferred /htmx/lc_features response. `features` shape:
+  //   { multiband_period: number|null, parametric_fits: {spm,fleet,tde} }
+  window.lcSetFeatures = function (canvasId, features) {
+    const canvas = document.getElementById(canvasId);
+    const chart = canvas && charts.get(canvas);
+    if (!chart || !features || typeof features !== "object") return;
+    const period = features.multiband_period;
+    if (period && period > 0) {
+      const foldBtn = document.querySelector(
+        `.lc-fold-toggle[data-target="${canvasId}"]`,
+      );
+      if (foldBtn) {
+        foldBtn.dataset.lcPeriod = String(period);
+        foldBtn.classList.remove("tw-hidden");
+        foldBtn.title =
+          `Click to fold the light curve at the multiband period (${
+            period.toPrecision(7)
+          } d) from the feature table. Two cycles are shown side-by-side.`;
+      }
+      chart.$lcPeriod = period;
+      // Honor a restored fold intent that we couldn't satisfy at first
+      // paint because the period wasn't known yet.
+      if (chart.$lcFoldRestoreIntent && chart.$lcFold !== "fold") {
+        chart.$lcFold = "fold";
+        if (foldBtn) foldBtn.dataset.lcFold = "fold";
+      }
+    }
+    const fits = (features.parametric_fits && typeof features.parametric_fits === "object")
+      ? features.parametric_fits : {};
+    chart.$lcFits = fits;
+    const oid = canvasId.replace(/^lc-canvas-/, "");
+    const overlayWrap = document.getElementById(`lc-overlay-wrap-${oid}`);
+    if (overlayWrap && (fits.spm || fits.fleet || fits.tde)) {
+      overlayWrap.classList.remove("tw-hidden");
+      const sel = overlayWrap.querySelector(".lc-overlay-select");
+      if (sel) {
+        for (const opt of sel.options) {
+          if (opt.value === "none") continue;
+          opt.disabled = !fits[opt.value];
+        }
+        // Restore overlay choice from URL if the corresponding fit now
+        // exists. Same gating logic initCanvas would have applied if it
+        // had this data at first paint.
+        const intent = chart.$lcOverlayRestoreIntent;
+        if (intent && fits[intent] && chart.$lcOverlay !== intent) {
+          chart.$lcOverlay = intent;
+          sel.value = intent;
+        }
+      }
+    }
+    applyModes(chart);
+  };
+
+  // Apply ra/dec from the deferred /htmx/lc_info response: stamp them on
+  // the canvas (so existing readers via canvas.dataset still work), reveal
+  // the ZTF DR control, and kick off the same dust-proxy fetch the
+  // synchronous render path used to do at initCanvas time.
+  window.lcSetCoords = function (canvasId, ra, dec) {
+    const canvas = document.getElementById(canvasId);
+    const chart = canvas && charts.get(canvas);
+    if (!canvas) return;
+    if (!(isFinite(ra) && isFinite(dec))) return;
+    canvas.dataset.ra = String(ra);
+    canvas.dataset.dec = String(dec);
+    const oid = canvasId.replace(/^lc-canvas-/, "");
+    // Reveal + stamp the ZTF DR overlay control. data-ra/data-dec on the
+    // button itself is what the existing DR-toggle handler reads.
+    const drWrap = document.getElementById(`lc-dr-wrap-${oid}`);
+    if (drWrap) {
+      drWrap.classList.remove("tw-hidden");
+      const drBtn = drWrap.querySelector(".lc-dr-toggle");
+      if (drBtn) {
+        drBtn.dataset.ra = String(ra);
+        drBtn.dataset.dec = String(dec);
+      }
+    }
+    // Kick the dust-proxy fetch (same logic as initCanvas — we only fill
+    // when the input is still empty, so a manually-typed override or a
+    // pre-existing fetch can't be clobbered).
+    const ebvInput = document.querySelector(
+      `.lc-ebv-input[data-target="${canvasId}"]`,
+    );
+    if (chart && window.dust && ebvInput && !ebvInput.value) {
+      window.dust.fetchEBV(ra, dec).then((res) => {
+        if (!res || !(res.ebv > 0)) return;
+        if (ebvInput.value) return;
+        ebvInput.value = res.ebv.toFixed(4);
+        ebvInput.title = `SF11=${(res.ebv_sf11 ?? NaN).toFixed(4)} · SFD98=${(res.ebv_sfd98 ?? NaN).toFixed(4)}`;
+        ebvInput.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
+  };
+
+  window.lcSetFoldPeriod = function (canvasId, period) {
+    const canvas = document.getElementById(canvasId);
+    const chart = canvas && charts.get(canvas);
+    if (!chart) return;
+    if (period && period > 0) {
+      chart.$lcPeriod = period;
+      chart.$lcFold = "fold";
+    } else {
+      chart.$lcFold = "off";
+    }
+    applyModes(chart);
+    cacheAndPushLcState(chart);
+    // Keep the Fold button (when present) in sync with the actual state.
+    // Without this, the next click on Fold would advance from a stale
+    // dataset value and look like a no-op to the user.
+    const foldBtn = document.querySelector(`.lc-fold-toggle[data-target="${canvasId}"]`);
+    if (foldBtn) {
+      foldBtn.dataset.lcFold = chart.$lcFold;
+      if (period && period > 0) foldBtn.dataset.lcPeriod = String(period);
+    }
+  };
 
   document.addEventListener("DOMContentLoaded", () => initAll(document));
   document.addEventListener("htmx:afterSwap", (evt) => initAll(evt.detail.target));

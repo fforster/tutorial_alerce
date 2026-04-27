@@ -195,6 +195,14 @@ async def search_form(
     except Exception as e:  # upstream API unreachable
         log.warning("classifier fetch failed for %s: %s", survey, e)
         tidy = []
+    # Pre-select the survey's default classifier when the URL doesn't pin
+    # one. Resolving here (instead of inside the template) means the same
+    # value flows through `selected_classifier` to the dependent class
+    # list and version dropdown — no separate "default" code paths.
+    if classifier is None:
+        default = SC(survey).default_classifier
+        if default and any(c["classifier_name"] == default for c in tidy):
+            classifier = default
     return templates.TemplateResponse(
         request,
         "search_form/form.html.jinja",
@@ -389,28 +397,24 @@ async def detail(
 
 @router.get("/htmx/lightcurve", response_class=HTMLResponse)
 async def lightcurve(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Synchronous LC render — *detections only*.
+
+    Forced photometry, features (Multiband_period + parametric fits) and
+    object coordinates (ra/dec for the dust proxy + ZTF DR overlay) are
+    fetched by deferred /htmx/lc_* endpoints below and update the chart
+    when they arrive. TNS redshift rides the basic-info panel's deferred
+    /htmx/tns_lookup, which OOB-populates `#lc-redshift-{oid}` if it's in
+    the DOM. Cuts the LC panel's perceived render time from ~15s (TNS
+    timeout dominated) to ~2-3s (just the LC fetch).
+    """
     _validate_survey(survey_id)
-    # object_info fetched in parallel to source ra/dec for the Milky-Way
-    # dust lookup (client-side, via the IRSA proxy). Failure is non-fatal —
-    # the light curve still renders, just without automatic E(B-V).
-    lc_task = lightcurve_service.get_lightcurve(survey=survey_id, oid=oid)
-    info_task = object_info_service.get_object_info(survey=survey_id, oid=oid)
-    results = await asyncio.gather(lc_task, info_task, return_exceptions=True)
-    data, info = results
-    if isinstance(data, Exception):
-        log.exception("lightcurve failed", exc_info=data)
+    try:
+        data = await lightcurve_service.get_lightcurve(survey=survey_id, oid=oid)
+    except Exception as e:
+        log.exception("lightcurve failed")
         return HTMLResponse(
-            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {data}</div>'
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
         )
-    ra = info.get("ra") if isinstance(info, dict) else None
-    dec = info.get("dec") if isinstance(info, dict) else None
-    # TNS report supplies the only non-user source of redshift the LC panel
-    # accepts (the other is a host click in the sky view, which arrives via
-    # JS at runtime). Sequential fetch — we only have ra/dec after info
-    # resolves. Failure is non-fatal: tns_z stays None and the input renders
-    # empty, so the panel never silently assumes a redshift.
-    tns = await tns_service.get_tns_info(ra=ra, dec=dec)
-    tns_z = tns.get("redshift") if tns else None
     return templates.TemplateResponse(
         request,
         "lightcurve/lightcurvePreview.html.jinja",
@@ -418,11 +422,99 @@ async def lightcurve(request: Request, oid: str, survey_id: str) -> HTMLResponse
             "lc": data,
             "oid": oid,
             "survey_id": survey_id,
-            "ra": ra,
-            "dec": dec,
-            "tns_z": tns_z,
+            # ra / dec start unknown — the deferred /htmx/lc_info fetch fills
+            # them in once object_info responds. Templates that gate on coords
+            # render the controls hidden (tw-hidden) and the JS reveals them.
+            "ra": None,
+            "dec": None,
             "extinction_r": SC(survey_id).extinction_r,
         },
+    )
+
+
+@router.get("/htmx/lc_fp", response_class=HTMLResponse)
+async def lc_fp(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Deferred FP fetch — re-shapes the LC payload with FP merged in and
+    returns an inline-script fragment that hands the new bundle to
+    `window.lcSetBundle(canvasId, bundle)`. Replaces the `<span>` in the
+    LC panel's loading strip via `outerHTML` so the indicator disappears
+    on success."""
+    _validate_survey(survey_id)
+    try:
+        bundle = await lightcurve_service.get_lc_fp_bundle(
+            survey=survey_id, oid=oid
+        )
+    except Exception:
+        log.exception("lc_fp failed")
+        bundle = None
+    return templates.TemplateResponse(
+        request,
+        "lightcurve/lcFpFragment.html.jinja",
+        {"oid": oid, "bundle": bundle},
+    )
+
+
+@router.get("/htmx/lc_features", response_class=HTMLResponse)
+async def lc_features(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Deferred features fetch — drives the Fold button (`Multiband_period`)
+    and the parametric-fit overlay picker. Returns an inline-script
+    fragment that calls `window.lcSetFeatures(canvasId, features)`."""
+    _validate_survey(survey_id)
+    try:
+        features = await lightcurve_service.get_lc_features_bundle(
+            survey=survey_id, oid=oid
+        )
+    except Exception:
+        log.exception("lc_features failed")
+        features = {"multiband_period": None, "parametric_fits": {}}
+    return templates.TemplateResponse(
+        request,
+        "lightcurve/lcFeaturesFragment.html.jinja",
+        {"oid": oid, "features": features},
+    )
+
+
+@router.get("/htmx/lc_info", response_class=HTMLResponse)
+async def lc_info(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Deferred object_info fetch — supplies ra/dec to the LC panel for
+    the dust-proxy lookup and the ZTF DR archival-photometry overlay.
+    Returns an inline-script fragment that calls
+    `window.lcSetCoords(canvasId, ra, dec)`."""
+    _validate_survey(survey_id)
+    ra: float | None = None
+    dec: float | None = None
+    try:
+        info = await object_info_service.get_object_info(
+            survey=survey_id, oid=oid
+        )
+    except Exception:
+        log.exception("lc_info failed")
+        info = None
+    if isinstance(info, dict):
+        ra = info.get("ra")
+        dec = info.get("dec")
+    return templates.TemplateResponse(
+        request,
+        "lightcurve/lcInfoFragment.html.jinja",
+        {"oid": oid, "ra": ra, "dec": dec},
+    )
+
+
+@router.get("/htmx/tns_lookup", response_class=HTMLResponse)
+async def tns_lookup(
+    request: Request, oid: str, ra: float | None = None, dec: float | None = None
+) -> HTMLResponse:
+    """Deferred TNS lookup — fired by the basic-info panel's TNS placeholder
+    once it has ra/dec. Returns the TNS row HTML for the basic-info row
+    *plus* a tiny inline script that auto-populates `#lc-redshift-{oid}`
+    (LC z input) when the TNS report carries a redshift. The script is
+    a no-op when the LC panel hasn't rendered yet — TNS is strictly
+    additive."""
+    tns = await tns_service.get_tns_info(ra=ra, dec=dec)
+    return templates.TemplateResponse(
+        request,
+        "tns/tnsLookupFragment.html.jinja",
+        {"oid": oid, "tns": tns},
     )
 
 
@@ -510,6 +602,11 @@ async def aladin(request: Request, oid: str, survey_id: str) -> HTMLResponse:
 
 @router.get("/htmx/object_information", response_class=HTMLResponse)
 async def object_information(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Synchronous basic-info render. TNS rides the deferred /htmx/tns_lookup
+    endpoint (the bridge can take 10-12s, often timing out — it used to
+    block this render and the LC handler too). The placeholder div in the
+    template fires hx-get="/htmx/tns_lookup" on load, so the panel paints
+    without TNS and the row populates when (or if) TNS responds."""
     _validate_survey(survey_id)
     try:
         info = await object_info_service.get_object_info(survey=survey_id, oid=oid)
@@ -518,22 +615,11 @@ async def object_information(request: Request, oid: str, survey_id: str) -> HTML
         return HTMLResponse(
             f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
         )
-    # TNS lookup rides the same render as the basic-info panel so the user
-    # sees classification/redshift without a second round trip or a flash of
-    # empty content. Served from the ALeRCE htmx bridge, which takes ra/dec;
-    # any failure (timeout, 5xx, no match) becomes `tns=None` and the
-    # template silently skips the row.
-    tns = await tns_service.get_tns_info(ra=info.get("ra"), dec=info.get("dec"))
-    # has_features drives whether the Basic-Info panel renders the
-    # "Show features" button. Survey-level flag (config-driven) rather than
-    # a hard-coded survey check so LSST lights up automatically once its
-    # features endpoint is wired into SurveyConfig.
     return templates.TemplateResponse(
         request,
         "basic_information/basicInformationPreview.html.jinja",
         {
             "info": info,
-            "tns": tns,
             "survey_id": survey_id,
             "has_features": SC(survey_id).features_url_template is not None,
         },

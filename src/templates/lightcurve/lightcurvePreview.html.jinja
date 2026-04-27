@@ -75,13 +75,18 @@
             — restricted to a TNS-reported z so we don't silently assume
             redshifts that haven't been confirmed for this object.
           #}
+          {#
+            No `value` — the deferred /htmx/tns_lookup fragment populates
+            this input asynchronously when (and only when) the basic-info
+            panel's TNS placeholder lands a positive redshift. Server-side
+            pre-fill would block the LC render on the slow TNS bridge.
+          #}
           <input
             id="lc-redshift-{{ oid }}"
             type="number"
             step="any"
             min="0"
             placeholder="z"
-            {% if tns_z is not none and tns_z > 0 %}value="{{ tns_z }}"{% endif %}
             data-target="lc-canvas-{{ oid }}"
             class="lc-redshift-input tw-w-[60px] tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
           />
@@ -109,90 +114,99 @@
           />
         </label>
         {#
-          ZTF DR overlay: archival ZTF science photometry at this sky
-          position. Shown for every survey — LSST objects can still have a
-          positional ZTF DR crossmatch — as long as ra/dec are known. Only
-          meaningful in Sci mode (DR points carry no difference flux); the
-          JS fetches /api/ztf_dr on first click and toggles visibility on
-          subsequent clicks.
+          ZTF DR overlay — always rendered (shown for every survey when
+          ra/dec are known) but hidden initially because the synchronous
+          render doesn't have coords. The deferred /htmx/lc_info fragment
+          calls `lcSetCoords` to stamp data-ra/data-dec and reveal it.
         #}
-        {% if ra is not none and dec is not none %}
-          <div class="tw-inline-flex tw-items-center tw-gap-1">
-            <button
-              type="button"
-              class="lc-dr-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-text-text-primary"
-              data-target="lc-canvas-{{ oid }}"
-              data-ra="{{ ra }}"
-              data-dec="{{ dec }}"
-              data-lc-dr="off"
-              title="Click to fetch/toggle ZTF Data Release archival photometry (cone search, 1.5 arcsec). DR points are science photometry, so they show only in Sci mode."
-            >ZTF DR</button>
-            {#
-              Vertical alpha slider — hidden by default, revealed once DR is
-              toggled on so the user can blend DR up/down dynamically without
-              re-fetching. `writing-mode` + `direction: rtl` + `orient` cover
-              Chromium, Firefox, and Safari vertical-range implementations;
-              the inline height is explicit because flex layout can't derive
-              it from a rotated child.
-            #}
-            <input
-              type="range"
-              orient="vertical"
-              class="lc-dr-alpha tw-hidden"
-              data-target="lc-canvas-{{ oid }}"
-              min="0" max="1" step="0.01" value="0.10"
-              style="writing-mode: vertical-rl; direction: rtl; width: 0.75rem; height: 2rem;"
-              title="Drag to adjust ZTF DR point transparency."
-            />
-          </div>
-        {% endif %}
-        {#
-          Fold button: only rendered when the feature-table Multiband_period
-          is positive (ZTF only — LSST's features endpoint isn't wired up).
-          The period rides on data-lc-period so the JS can swap between MJD
-          and phase purely client-side.
-        #}
-        {% if lc.multiband_period and lc.multiband_period > 0 %}
+        <div
+          id="lc-dr-wrap-{{ oid }}"
+          class="lc-dr-wrap tw-inline-flex tw-items-center tw-gap-1 tw-hidden"
+        >
           <button
             type="button"
-            class="lc-fold-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-bg-bg-tertiary"
+            class="lc-dr-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-text-text-primary"
             data-target="lc-canvas-{{ oid }}"
-            data-lc-fold="off"
-            data-lc-period="{{ lc.multiband_period }}"
-            title="Click to fold the light curve at the multiband period ({{ '%.6f'|format(lc.multiband_period) }} d) from the feature table. Two cycles are shown side-by-side."
-          >Fold</button>
-        {% endif %}
+            data-lc-dr="off"
+            title="Click to fetch/toggle ZTF Data Release archival photometry (cone search, 1.5 arcsec). DR points are science photometry, so they show only in Sci mode."
+          >ZTF DR</button>
+          {#
+            Vertical alpha slider — hidden by default, revealed once DR is
+            toggled on so the user can blend DR up/down dynamically without
+            re-fetching. `writing-mode` + `direction: rtl` + `orient` cover
+            Chromium, Firefox, and Safari vertical-range implementations;
+            the inline height is explicit because flex layout can't derive
+            it from a rotated child.
+          #}
+          <input
+            type="range"
+            orient="vertical"
+            class="lc-dr-alpha tw-hidden"
+            data-target="lc-canvas-{{ oid }}"
+            min="0" max="1" step="0.01" value="0.10"
+            style="writing-mode: vertical-rl; direction: rtl; width: 0.75rem; height: 2rem;"
+            title="Drag to adjust ZTF DR point transparency."
+          />
+        </div>
         {#
-          Parametric-fit overlay picker: only rendered when the features
-          endpoint carried at least one of SPM / FLEET / TDE tail for this
-          object. Options for overlays without any band data are disabled so
-          the user can see they're defined but empty here.
+          Fold button — always rendered, hidden until the deferred
+          /htmx/lc_features fragment lands a positive Multiband_period and
+          calls `lcSetFeatures` (which stamps data-lc-period and removes
+          tw-hidden). Empty data-lc-period is the "no period yet" sentinel.
         #}
-        {% if lc.parametric_fits %}
-          <label
-            class="tw-inline-flex tw-items-center tw-gap-1 tw-text-[11px] tw-text-text-muted"
-            title="Overlay a parametric model fit (from the latest feature-extractor version) on top of the light curve. SPM is the Sánchez-Sáez+2021 stochastic-parametric model; FLEET and TDE-tail are the ALeRCE transient-tail models."
+        <button
+          type="button"
+          class="lc-fold-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-bg-bg-tertiary tw-hidden"
+          data-target="lc-canvas-{{ oid }}"
+          data-lc-fold="off"
+          data-lc-period=""
+          title="Click to fold the light curve at the multiband period from the feature table. Two cycles are shown side-by-side."
+        >Fold</button>
+        {#
+          Parametric-fit overlay picker — always rendered, hidden until
+          the deferred /htmx/lc_features fragment populates the per-overlay
+          disabled flags. `lcSetFeatures` toggles option[disabled] based on
+          which fits the object actually has (SPM / FLEET / TDE).
+        #}
+        <label
+          id="lc-overlay-wrap-{{ oid }}"
+          class="lc-overlay-wrap tw-inline-flex tw-items-center tw-gap-1 tw-text-[11px] tw-text-text-muted tw-hidden"
+          title="Overlay a parametric model fit (from the latest feature-extractor version) on top of the light curve. SPM is the Sánchez-Sáez+2021 stochastic-parametric model; FLEET and TDE-tail are the ALeRCE transient-tail models."
+        >
+          Overlay
+          <select
+            id="lc-overlay-{{ oid }}"
+            class="lc-overlay-select tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary"
+            data-target="lc-canvas-{{ oid }}"
+            data-lc-overlay="none"
           >
-            Overlay
-            <select
-              id="lc-overlay-{{ oid }}"
-              class="lc-overlay-select tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary"
-              data-target="lc-canvas-{{ oid }}"
-              data-lc-overlay="none"
-            >
-              <option value="none">none</option>
-              <option value="spm"{% if not lc.parametric_fits.spm %} disabled{% endif %}>SPM</option>
-              <option value="fleet"{% if not lc.parametric_fits.fleet %} disabled{% endif %}>FLEET</option>
-              <option value="tde"{% if not lc.parametric_fits.tde %} disabled{% endif %}>TDE tail</option>
-            </select>
-          </label>
-        {% endif %}
+            <option value="none">none</option>
+            <option value="spm" disabled>SPM</option>
+            <option value="fleet" disabled>FLEET</option>
+            <option value="tde" disabled>TDE tail</option>
+          </select>
+        </label>
         <button
           type="button"
           class="chart-zoom-reset-btn tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
           data-target="lc-canvas-{{ oid }}"
           title="Reset the light-curve zoom (same as double-clicking the chart)."
         >Reset zoom</button>
+        {#
+          Periodogram toggle. Swaps the position-residuals panel with the
+          periodogram panel (they share a grid cell). Periodogram panel
+          reads MJD/flux/eflux from this LC chart and folds it back at
+          the picked period — no separate folded-LC canvas. Toggle is
+          aria-pressed so the highlight stays in sync.
+        #}
+        <button
+          type="button"
+          class="lc-periodogram-btn tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
+          data-target="lc-canvas-{{ oid }}"
+          aria-pressed="false"
+          onclick="window.togglePeriodogramPanel('lc-canvas-{{ oid }}')"
+          title="Open the periodogram panel (replaces position residuals). Click again to switch back."
+        >Periodogram</button>
         {#
           CSV export. Emits every projection as its own column — the full
           Flux/Mag × Diff/Sci × App/Abs × Obs/Der cross-product, plus the
@@ -213,23 +227,52 @@
     </div>
   </div>
 
-  {% if lc.parametric_fits %}
-    {# Filled by lightcurve.js when the overlay select changes; hidden when "none". #}
-    <div
-      id="lc-overlay-info-{{ oid }}"
-      class="lc-overlay-info tw-hidden tw-font-mono tw-text-[10px] tw-text-text-secondary tw-px-1 tw-pb-1 tw-leading-snug"
-      data-target="lc-canvas-{{ oid }}"
-    ></div>
-  {% endif %}
+  {# Always rendered — `lcSetFeatures` populates it after the deferred
+     features fetch lands. Hidden until then (or when overlay = "none"). #}
+  <div
+    id="lc-overlay-info-{{ oid }}"
+    class="lc-overlay-info tw-hidden tw-font-mono tw-text-[10px] tw-text-text-secondary tw-px-1 tw-pb-1 tw-leading-snug"
+    data-target="lc-canvas-{{ oid }}"
+  ></div>
 
+  {#
+    Deferred-load status strip. Three independent fetches (FP, features,
+    coords) fire on load and replace their own span via outerHTML — the
+    spinner stops the moment each piece arrives, and each fragment also
+    runs an inline script that hands its payload to `lcSetBundle`,
+    `lcSetFeatures`, or `lcSetCoords`. The canvas is already on screen
+    by this point, so the user sees detections immediately and the rest
+    fills in within a few seconds.
+  #}
   {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
+    <div
+      id="lc-loading-status-{{ oid }}"
+      class="tw-text-[10px] tw-text-text-muted tw-px-1 tw-pb-1 tw-flex tw-gap-3 tw-items-center tw-flex-wrap"
+    >
+      <span
+        hx-get="{{ API_URL }}/htmx/lc_fp?oid={{ oid }}&survey_id={{ survey_id }}"
+        hx-trigger="load"
+        hx-swap="outerHTML"
+        title="Loading forced photometry…"
+      ><span class="tw-inline-block tw-animate-spin">◐</span> FP…</span>
+      <span
+        hx-get="{{ API_URL }}/htmx/lc_features?oid={{ oid }}&survey_id={{ survey_id }}"
+        hx-trigger="load"
+        hx-swap="outerHTML"
+        title="Loading features (Multiband_period + parametric fits)…"
+      ><span class="tw-inline-block tw-animate-spin">◐</span> features…</span>
+      <span
+        hx-get="{{ API_URL }}/htmx/lc_info?oid={{ oid }}&survey_id={{ survey_id }}"
+        hx-trigger="load"
+        hx-swap="outerHTML"
+        title="Loading object coordinates (drives the dust proxy and ZTF DR overlay)…"
+      ><span class="tw-inline-block tw-animate-spin">◐</span> coords…</span>
+    </div>
     <div class="tw-relative tw-flex-1 tw-min-h-[15.84rem]">
       <canvas
         id="lc-canvas-{{ oid }}"
         class="lightcurve-canvas"
         data-lc='{{ lc|tojson_compact }}'
-        {% if ra is not none %}data-ra="{{ ra }}"{% endif %}
-        {% if dec is not none %}data-dec="{{ dec }}"{% endif %}
         data-ext-r='{{ extinction_r|tojson_compact }}'
       ></canvas>
     </div>

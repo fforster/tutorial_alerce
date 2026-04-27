@@ -1,0 +1,19 @@
+{#
+  Deferred features fragment — returned by /htmx/lc_features.
+
+  Hands `multiband_period` + `parametric_fits` to `lcSetFeatures`, which:
+  - reveals the Fold button (hidden initially) and stamps data-lc-period
+    when a positive Multiband_period is available;
+  - reveals the overlay <select> and disables options for fits the object
+    doesn't have (SPM/FLEET/TDE).
+  Both controls were rendered in lightcurvePreview.html.jinja with
+  `tw-hidden` so this fragment only flips visibility — no DOM injection.
+#}
+<span class="tw-text-text-muted">features&nbsp;{% if features.multiband_period or features.parametric_fits %}✓{% else %}—{% endif %}</span>
+<script>
+(function () {
+  if (window.lcSetFeatures) {
+    window.lcSetFeatures("lc-canvas-{{ oid }}", {{ features|tojson_compact|safe }});
+  }
+})();
+</script>

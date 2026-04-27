@@ -325,10 +325,10 @@ def test_extract_multiband_period_ignores_older_versions_with_larger_value():
     assert _extract_multiband_period(features) == 10.16
 
 
-def test_get_lightcurve_fetches_features_and_threads_period(monkeypatch):
-    """End-to-end: get_lightcurve must call the features endpoint and pass
-    the parsed Multiband_period into shape_lightcurve so the Fold button
-    renders on the template."""
+def test_get_lightcurve_core_does_not_fetch_features_or_fp(monkeypatch):
+    """Core LC fetch is detections-only — keeps the synchronous /htmx/lightcurve
+    response fast (~2 s instead of ~15 s, which the slow TNS bridge dominated).
+    Features and FP are now deferred via /htmx/lc_features and /htmx/lc_fp."""
     import asyncio
 
     from src.services import alerce_client, lightcurve as lc_mod
@@ -337,47 +337,23 @@ def test_get_lightcurve_fetches_features_and_threads_period(monkeypatch):
 
     async def fake_get(url: str):
         calls.append(url)
-        if "features" in url:
-            return [
-                {"name": "Amplitude", "value": 0.5},
-                {"name": "Multiband_period", "value": 3.14159},
-            ]
-        if "lightcurve" in url and "v2" in url:
-            # ZTF v2 FP endpoint
-            return {"detections": [], "forced_photometry": []}
-        # ZTF v1 lightcurve
         return {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
 
     monkeypatch.setattr(alerce_client, "_get", fake_get)
     out = asyncio.run(lc_mod.get_lightcurve(survey="ztf", oid="ZTF20abcxyz"))
-    assert out["multiband_period"] == 3.14159
-    assert any("features" in u for u in calls)
-
-
-def test_get_lightcurve_tolerates_features_failure(monkeypatch):
-    """A broken features endpoint shouldn't take the LC panel down — the
-    Fold button is the only casualty."""
-    import asyncio
-
-    from src.services import alerce_client, lightcurve as lc_mod
-
-    async def fake_get(url: str):
-        if "features" in url:
-            raise RuntimeError("features endpoint down")
-        if "v2" in url:
-            return {"detections": [], "forced_photometry": []}
-        return {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
-
-    monkeypatch.setattr(alerce_client, "_get", fake_get)
-    out = asyncio.run(lc_mod.get_lightcurve(survey="ztf", oid="ZTF20abcxyz"))
-    assert out["multiband_period"] is None
     assert out["n_det"] == 1
+    # No FP, no features — those land via the deferred bundles.
+    assert out["multiband_period"] is None
+    assert out["parametric_fits"] == {}
+    assert all("features" not in u for u in calls)
+    assert all("v2" not in u for u in calls)
 
 
-def test_get_lightcurve_threads_parametric_fits_from_same_features_call(monkeypatch):
-    """One features fetch must populate both the fold-period and the
-    parametric-fits bundle. Any drift would defeat the "always latest version"
-    invariant we enforce via pick_default_version."""
+def test_get_lc_features_bundle_threads_period_and_fits(monkeypatch):
+    """One features fetch populates both Multiband_period (Fold button) and
+    the parametric-fits bundle. The "single fetch, two outputs" invariant
+    is what keeps the periodogram pipeline-period reference line and the
+    overlay picker from drifting apart from the modal."""
     import asyncio
 
     from src.services import alerce_client, lightcurve as lc_mod
@@ -390,7 +366,6 @@ def test_get_lightcurve_threads_parametric_fits_from_same_features_call(monkeypa
             feature_calls += 1
             return [
                 {"name": "Multiband_period", "value": 3.14, "fid": 12, "version": "27.5.6"},
-                # A full SPM fit on band g (fid=1) at the same version.
                 {"name": "SPM_A", "value": 0.5, "fid": 1, "version": "27.5.6"},
                 {"name": "SPM_beta", "value": 0.3, "fid": 1, "version": "27.5.6"},
                 {"name": "SPM_t0", "value": 5.0, "fid": 1, "version": "27.5.6"},
@@ -398,33 +373,75 @@ def test_get_lightcurve_threads_parametric_fits_from_same_features_call(monkeypa
                 {"name": "SPM_tau_rise", "value": 1.0, "fid": 1, "version": "27.5.6"},
                 {"name": "SPM_tau_fall", "value": 10.0, "fid": 1, "version": "27.5.6"},
             ]
-        if "v2" in url:
-            return {"detections": [], "forced_photometry": []}
-        return {"detections": [_ztf_det(60000.0, 1, 20.0, candid="1")]}
+        return {}
 
     monkeypatch.setattr(alerce_client, "_get", fake_get)
-    out = asyncio.run(lc_mod.get_lightcurve(survey="ztf", oid="ZTF20abcxyz"))
-    # Single features call served both extractors.
+    out = asyncio.run(lc_mod.get_lc_features_bundle(survey="ztf", oid="ZTF20abcxyz"))
     assert feature_calls == 1
     assert out["multiband_period"] == 3.14
     assert out["parametric_fits"]["spm"]["g"]["A"] == 0.5
 
 
-def test_get_lightcurve_parametric_fits_empty_when_features_missing(monkeypatch):
-    """No features endpoint (LSST) → parametric_fits defaults to {} so the
-    overlay select isn't rendered."""
+def test_get_lc_features_bundle_tolerates_failure(monkeypatch):
+    """A broken features endpoint produces an empty bundle — Fold + overlay
+    picker stay hidden, panel stays up."""
     import asyncio
 
     from src.services import alerce_client, lightcurve as lc_mod
 
     async def fake_get(url: str):
-        if "forced-photometry" in url:
-            return []
-        return {"detections": [_lsst_det(60000.0, 1, 1000.0)]}
+        raise RuntimeError("features endpoint down")
 
     monkeypatch.setattr(alerce_client, "_get", fake_get)
-    out = asyncio.run(lc_mod.get_lightcurve(survey="lsst", oid="lsst-oid-1"))
-    assert out["parametric_fits"] == {}
+    out = asyncio.run(lc_mod.get_lc_features_bundle(survey="ztf", oid="ZTF20abcxyz"))
+    assert out == {"multiband_period": None, "parametric_fits": {}}
+
+
+def test_get_lc_features_bundle_empty_for_lsst(monkeypatch):
+    """LSST has no features endpoint configured, so the bundle skips the
+    fetch entirely and returns the same empty shape."""
+    import asyncio
+
+    from src.services import alerce_client, lightcurve as lc_mod
+
+    called = False
+
+    async def fake_get(url: str):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(alerce_client, "_get", fake_get)
+    out = asyncio.run(lc_mod.get_lc_features_bundle(survey="lsst", oid="lsst-oid-1"))
+    assert out == {"multiband_period": None, "parametric_fits": {}}
+    assert not called
+
+
+def test_get_lc_fp_bundle_reshapes_with_v2_corr_merge(monkeypatch):
+    """The deferred FP fetch re-fetches the v1 LC alongside FP and re-merges
+    v2 mag_corr — that's the only path to valid ZTF sci-mode error bars."""
+    import asyncio
+
+    from src.services import alerce_client, lightcurve as lc_mod
+
+    async def fake_get(url: str):
+        if "v2" in url:
+            return {
+                "detections": [{"candid": "1", "mag_corr": 19.5,
+                                "e_mag_corr_ext": 0.04}],
+                "forced_photometry": [],
+            }
+        # ZTF v1 lightcurve
+        return {"detections": [
+            _ztf_det(60000.0, 1, 20.0, sigmapsf=100.0, candid="1"),
+        ]}
+
+    monkeypatch.setattr(alerce_client, "_get", fake_get)
+    out = asyncio.run(lc_mod.get_lc_fp_bundle(survey="ztf", oid="ZTF20abcxyz"))
+    # v2 mag_corr/e_mag_corr_ext made it through to the band's e_sci_flux.
+    g_pt = out["bands"][0]["points"][0]
+    assert g_pt["e_sci_flux"] is not None
+    assert g_pt["e_sci_flux"] > 0
 
 
 def test_shape_lightcurve_picks_up_merged_e_sci_flux_end_to_end():
