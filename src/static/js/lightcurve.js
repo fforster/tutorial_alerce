@@ -811,6 +811,30 @@
             grid: { drawOnChartArea: false, drawTicks: true, tickColor: "#8b949e" },
             border: { display: true, color: "#8b949e" },
             ticks: { color: "#8b949e" },
+            // Chart.js auto-fits the y-axis to point `y` values only, which
+            // can clip error bars whose lo/hi extends past the brightest /
+            // faintest detection. Walk every visible point's projected
+            // (yLo, yHi) and widen the data range here so the bars stay
+            // inside the plot area. Non-finite caps (open ends in mag mode)
+            // are skipped — the errorBarPlugin already paints them as
+            // arrows that reach the edge.
+            afterDataLimits(scale) {
+              const ch = scale.chart;
+              let lo = scale.min;
+              let hi = scale.max;
+              ch.data.datasets.forEach((ds, di) => {
+                if (!ch.isDatasetVisible(di)) return;
+                const data = ds.data || [];
+                for (let i = 0; i < data.length; i++) {
+                  const p = data[i];
+                  if (!p) continue;
+                  if (p.yLo != null && isFinite(p.yLo) && p.yLo < lo) lo = p.yLo;
+                  if (p.yHi != null && isFinite(p.yHi) && p.yHi > hi) hi = p.yHi;
+                }
+              });
+              if (isFinite(lo)) scale.min = lo;
+              if (isFinite(hi)) scale.max = hi;
+            },
           },
         },
         plugins: {
