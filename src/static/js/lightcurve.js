@@ -829,16 +829,23 @@
             // like Chart.js's default.
             onClick: (_e, legendItem, legend) => {
               const ci = legend.chart;
-              // Survey header: toggle every dataset in that survey group as
-              // a unit. "Hide all" wins when any member is currently visible
-              // (one click ⇒ everything off); "show all" only when the whole
-              // group is already hidden — mirrors Chart.js's per-item toggle
-              // semantics, just lifted to the group.
+              // Group header: toggle every dataset in that (survey, kind)
+              // bucket as a unit. "Hide all" wins when any member is
+              // currently visible (one click ⇒ everything off); "show all"
+              // only when the whole group is already hidden — mirrors
+              // Chart.js's per-item toggle semantics, just lifted to the
+              // subgroup. $kind being undefined on a header collapses to
+              // "all kinds for this survey" (defensive fallback).
               if (legendItem.datasetIndex == null) {
                 const survey = legendItem.$survey;
+                const kind = legendItem.$kind;
                 if (!survey) return;
                 const indices = ci.data.datasets
-                  .map((ds, i) => (ds.$survey === survey ? i : -1))
+                  .map((ds, i) => {
+                    if (ds.$survey !== survey) return -1;
+                    if (kind && ds.$kind !== kind) return -1;
+                    return i;
+                  })
                   .filter((i) => i >= 0);
                 if (!indices.length) return;
                 const anyVisible = indices.some((i) => ci.isDatasetVisible(i));
@@ -859,9 +866,19 @@
               usePointStyle: true,
               boxWidth: 10,
               generateLabels: (ch) => {
-                // Group order: LSST first, then ZTF, then anything else.
-                // Within each group, preserve the dataset emission order
-                // (det → FP → DR) since that's what `buildDatasets` returns.
+                // Two-level grouping: by survey first, then by kind within
+                // each survey. Header form is "<Survey> <kind>:", e.g.
+                //   LSST det: u g r i z y · LSST FP: u g r i z y ·
+                //   ZTF det: g r i · ZTF FP: g r i
+                // The (FP)/(DR) suffixes are stripped from the displayed
+                // band labels because the kind is already in the header
+                // — keeps each entry to a single character or two.
+                //
+                // Hidden datasets are dimmed (text + marker recolored to
+                // a muted grey) instead of struck-through; we always set
+                // `hidden: false` on the legend item to suppress Chart.js's
+                // built-in strikethrough, and override fillStyle / strokeStyle
+                // / fontColor to signal the disabled state visually.
                 //
                 // `fontColor` is repeated per item because a custom
                 // generateLabels bypasses the global `labels.color` cascade
@@ -869,46 +886,79 @@
                 // itself); without it the survey headers and band names
                 // render in the dataset's own color rather than whitish.
                 const TEXT = "#c9d1d9";
+                const DIMMED = "#484f58";
+                const KIND_LABEL = { det: "det", fp: "FP", dr: "DR", overlay: "overlay" };
+                const KIND_ORDER = ["det", "fp", "dr", "overlay"];
+                // Strip the kind suffix from the dataset label since the
+                // header already names it. "g (FP)" → "g", "SPM g" → "SPM g".
+                const stripSuffix = (text, kind) => {
+                  if (kind === "fp") return text.replace(/\s*\(FP\)\s*$/, "");
+                  if (kind === "dr") return text.replace(/\s*\(DR\)\s*$/, "");
+                  return text;
+                };
+                // groups[survey][kind] → [item, …]
                 const groups = new Map();
                 ch.data.datasets.forEach((ds, i) => {
                   const survey = ds.$survey || "";
-                  if (!groups.has(survey)) groups.set(survey, []);
-                  groups.get(survey).push({
-                    text: ds.label,
-                    fillStyle: ds.backgroundColor,
-                    strokeStyle: ds.borderColor,
+                  const kind = ds.$kind || "other";
+                  const realHidden = !ch.isDatasetVisible(i);
+                  const fill = realHidden ? DIMMED : ds.backgroundColor;
+                  const stroke = realHidden ? DIMMED : ds.borderColor;
+                  const fontColor = realHidden ? DIMMED : TEXT;
+                  if (!groups.has(survey)) groups.set(survey, new Map());
+                  const byKind = groups.get(survey);
+                  if (!byKind.has(kind)) byKind.set(kind, []);
+                  byKind.get(kind).push({
+                    text: stripSuffix(ds.label, kind),
+                    fillStyle: fill,
+                    strokeStyle: stroke,
                     lineWidth: ds.borderWidth || 1,
                     pointStyle: ds.pointStyle || pointStyleFor(survey),
-                    fontColor: TEXT,
-                    hidden: !ch.isDatasetVisible(i),
+                    fontColor,
+                    // Always false: Chart.js applies strikethrough when
+                    // hidden=true. Real visibility is preserved on the
+                    // dataset (meta.hidden) so onClick toggles correctly.
+                    hidden: false,
                     datasetIndex: i,
                   });
                 });
                 const ordered = [];
                 const surveys = ["lsst", "ztf", ...Array.from(groups.keys()).filter((s) => s !== "lsst" && s !== "ztf")];
                 for (const s of surveys) {
-                  const items = groups.get(s);
-                  if (!items || !items.length) continue;
-                  if (s) {
-                    // Header reflects group-visibility: when every member is
-                    // hidden the header renders struck-through (same affordance
-                    // Chart.js applies to a hidden series), so the user sees
-                    // "the group is off". `$survey` is the key onClick uses
-                    // to look up which datasets belong to the group.
-                    const allHidden = items.every((it) => it.hidden);
-                    ordered.push({
-                      text: `${surveyLabel(s)}:`,
-                      fillStyle: "transparent",
-                      strokeStyle: "transparent",
-                      lineWidth: 0,
-                      pointStyle: "circle",
-                      fontColor: TEXT,
-                      hidden: allHidden,
-                      $survey: s,
-                      // No datasetIndex — onClick uses that to detect headers.
-                    });
+                  const byKind = groups.get(s);
+                  if (!byKind) continue;
+                  const kinds = [
+                    ...KIND_ORDER.filter((k) => byKind.has(k)),
+                    ...Array.from(byKind.keys()).filter((k) => !KIND_ORDER.includes(k)),
+                  ];
+                  for (const k of kinds) {
+                    const items = byKind.get(k);
+                    if (!items || !items.length) continue;
+                    if (s) {
+                      // Header reflects group-visibility via the same dim
+                      // color the disabled band entries use; clicking it
+                      // toggles every member of the (survey, kind) bucket.
+                      // $survey + $kind together are the key onClick uses
+                      // to look up the right datasets.
+                      const allHidden = items.every(
+                        (_it, idx) => !ch.isDatasetVisible(items[idx].datasetIndex),
+                      );
+                      const headerLabel = KIND_LABEL[k] || k;
+                      ordered.push({
+                        text: `${surveyLabel(s)} ${headerLabel}:`,
+                        fillStyle: "transparent",
+                        strokeStyle: "transparent",
+                        lineWidth: 0,
+                        pointStyle: "circle",
+                        fontColor: allHidden ? DIMMED : TEXT,
+                        hidden: false,
+                        $survey: s,
+                        $kind: k,
+                        // No datasetIndex — onClick uses that to detect headers.
+                      });
+                    }
+                    ordered.push(...items);
                   }
-                  ordered.push(...items);
                 }
                 return ordered;
               },
