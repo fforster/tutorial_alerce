@@ -100,6 +100,11 @@ def normalize_ztf(d: dict[str, Any]) -> dict[str, Any]:
         "mag_corr": mag_corr,
         "e_mag_corr": e_mag_corr,
         "isdiffpos": _coerce_isdiffpos(d.get("isdiffpos")),
+        # Per-detection astrometry — feeds the position-residuals panel
+        # client-side. Pure pass-through; missing/non-numeric stays None
+        # and the consumer skips the row.
+        "ra": d.get("ra"),
+        "dec": d.get("dec"),
         "candid": ident,
         "identifier": ident,
         "has_stamp": bool(d.get("has_stamp")),
@@ -132,6 +137,11 @@ def normalize_lsst(d: dict[str, Any]) -> dict[str, Any]:
         "mag_corr": None,
         "e_mag_corr": None,
         "isdiffpos": None,
+        # Per-detection astrometry — feeds the position-residuals panel
+        # client-side. Pure pass-through; missing/non-numeric stays None
+        # and the consumer skips the row.
+        "ra": d.get("ra"),
+        "dec": d.get("dec"),
         "candid": str(d["candid"]) if d.get("candid") is not None else None,
         "identifier": ident,
         "has_stamp": bool(d.get("has_stamp")),

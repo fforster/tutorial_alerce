@@ -64,6 +64,13 @@ def _bucket_by_band(normalized: list[dict[str, Any]], cfg) -> list[dict[str, Any
                 # must match the extractor's `brightness > 1 µJy` signed
                 # filter) multiply flux by this sign. None on LSST.
                 "isdiffpos": d.get("isdiffpos"),
+                # Per-detection astrometry — used by the position-residuals
+                # panel, which now derives client-side from $lcRaw / $lcXRaw
+                # so it inherits the LC's band/survey visibility toggles.
+                # Pure pass-through; missing values stay null and the
+                # consumer skips the row.
+                "ra": d.get("ra"),
+                "dec": d.get("dec"),
             }
         )
     ordered = [

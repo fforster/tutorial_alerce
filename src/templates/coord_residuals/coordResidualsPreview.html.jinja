@@ -1,16 +1,23 @@
 {#
-  Coordinate-residuals panel — rendered by /htmx/coord_residuals.
-  ctx has {points:[{d_ra,d_dec,mjd,band}], n_points, mean_ra, mean_dec,
-           mjd_min, mjd_max}.
-  Scatter is color-coded by MJD; the colorbar gradient below the canvas
-  shows the mapping so moving-object tracks (time-ordered drift) stand out.
+  Position-residuals panel — static shell. The scatter is computed
+  entirely client-side from the live light-curve chart (`coord_residuals.js`
+  reads `$lcRaw` + `$lcXRaw` on the canvas referenced by `data-lc-target`,
+  filters by the LC legend's visibility, and re-renders on
+  `lc:visibilityChanged` / `lc:dataChanged`). That gives us cross-survey
+  inclusion + band-toggle sync without a duplicate server fetch.
 #}
-<div class="tw-h-full tw-flex tw-flex-col tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
+<div
+  data-coord-panel
+  data-lc-target="lc-canvas-{{ oid }}"
+  class="tw-h-full tw-flex tw-flex-col tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4"
+>
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-2 tw-gap-3">
     {% from "_panel_help.html.jinja" import panel_help %}
     {% call panel_help("Position residuals", side="right") %}
       <div class="tw-font-semibold tw-mb-1">What's plotted</div>
       <p class="tw-mb-3 tw-text-text-secondary">Each detection's offset from the object's mean position — Δ RA·cos(δ) on X, Δ Dec on Y, both in arcseconds. Axes are symmetric so the origin sits at centre.</p>
+      <div class="tw-font-semibold tw-mb-1">Where the points come from</div>
+      <p class="tw-mb-3 tw-text-text-secondary">All loaded LC detections feed in — primary survey + matched cross-survey counterpart. Only the bands currently visible in the Light curve legend are shown here; toggle a band entry (or a survey/kind header like <span class="mono">LSST det:</span>) to add or drop it. Marker shape mirrors the LC: <span class="mono">circle</span>=LSST, <span class="mono">square</span>=ZTF.</p>
       <div class="tw-font-semibold tw-mb-1">How to read it</div>
       <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
         <li>Color encodes MJD (viridis: purple → yellow = old → new)</li>
@@ -28,41 +35,36 @@
     {% endcall %}
     <div class="tw-flex tw-items-center tw-gap-3">
       <div
+        data-coord-count
         class="tw-text-text-muted tw-text-xs"
-        title="Scatter of detection RA/Dec around the mean position (arcsec). A clear linear track color-coded by time suggests a moving object."
-      >
-        {{ ctx.n_points }} pt{% if ctx.n_points != 1 %}s{% endif %}
-      </div>
-      {% if ctx.points %}
-        <button
-          type="button"
-          class="chart-zoom-reset-btn tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
-          data-target="coord-canvas-{{ oid }}"
-          title="Reset the scatter zoom (same as double-clicking the chart)."
-        >Reset zoom</button>
-      {% endif %}
+        title="Live count of detections currently in the scatter — reflects the LC legend's band/survey visibility."
+      >0 pts</div>
+      <button
+        type="button"
+        class="chart-zoom-reset-btn tw-px-2 tw-py-0.5 tw-text-xs tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
+        data-target="coord-canvas-{{ oid }}"
+        title="Reset the scatter zoom (same as double-clicking the chart)."
+      >Reset zoom</button>
     </div>
   </div>
 
-  {% if ctx.points %}
-    <div class="tw-relative tw-flex-1 tw-min-h-[14.4rem]">
-      <canvas
-        id="coord-canvas-{{ oid }}"
-        class="coord-residuals-canvas"
-        data-coords='{{ ctx|tojson_compact }}'
-      ></canvas>
-    </div>
-    <div class="tw-mt-2">
-      <div class="tw-flex tw-items-center tw-justify-between tw-text-[10px] tw-text-text-muted tw-mb-1">
-        <span>MJD {{ "%.2f"|format(ctx.mjd_min) }}</span>
-        <span>MJD {{ "%.2f"|format(ctx.mjd_max) }}</span>
-      </div>
-      <div
-        class="tw-h-2 tw-rounded"
-        style="background: linear-gradient(to right, #440154, #3b528b, #21908c, #5dc863, #fde725);"
-      ></div>
-    </div>
-  {% else %}
-    <div class="tw-text-xs tw-text-text-muted tw-py-6 tw-text-center">Not enough detections to plot residuals.</div>
-  {% endif %}
+  <div class="tw-relative tw-flex-1 tw-min-h-[14.4rem]">
+    <canvas
+      id="coord-canvas-{{ oid }}"
+      class="coord-residuals-canvas"
+    ></canvas>
+  </div>
+  <div class="tw-mt-2">
+    {# MJD endpoints + colorbar — populated client-side once at least one
+       detection is in the scatter. Hidden until then to avoid a stub
+       "MJD - / MJD -" row before the LC fetch lands. #}
+    <div
+      data-coord-mjd-range
+      class="tw-flex tw-items-center tw-justify-between tw-text-[10px] tw-text-text-muted tw-mb-1 tw-hidden"
+    ></div>
+    <div
+      class="tw-h-2 tw-rounded"
+      style="background: linear-gradient(to right, #440154, #3b528b, #21908c, #5dc863, #fde725);"
+    ></div>
+  </div>
 </div>

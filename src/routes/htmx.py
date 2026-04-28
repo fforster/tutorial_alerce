@@ -544,18 +544,20 @@ async def tns_lookup(
 
 @router.get("/htmx/coord_residuals", response_class=HTMLResponse)
 async def coord_residuals(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Position-residuals panel — now a static shell.
+
+    The actual residuals derive client-side from the live LC chart
+    (`coord_residuals.js` walks `chart.$lcRaw` + `chart.$lcXRaw`, applies
+    the LC legend's visibility, and re-renders on `lc:visibilityChanged`).
+    No upstream LC fetch happens here, so the panel paints instantly and
+    inherits cross-survey + band-toggle state for free. The
+    `shape_coord_residuals` service is preserved for programmatic use.
+    """
     _validate_survey(survey_id)
-    try:
-        ctx = await coord_residuals_service.get_coord_residuals(survey=survey_id, oid=oid)
-    except Exception as e:
-        log.exception("coord_residuals failed")
-        return HTMLResponse(
-            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
-        )
     return templates.TemplateResponse(
         request,
         "coord_residuals/coordResidualsPreview.html.jinja",
-        {"ctx": ctx, "oid": oid, "survey_id": survey_id},
+        {"oid": oid, "survey_id": survey_id},
     )
 
 

@@ -599,7 +599,11 @@
     }));
     // FP uses the same band colors but rendered as hollow triangles so they
     // read as distinct from detections without crowding the legend/tooltip.
-    // FP rows don't carry a stamp identifier, so clicks on them are no-ops.
+    // ZTF FP triangles are rotated 180° (apex-down) so the survey is also
+    // legible at a glance for forced photometry — LSST FP stays apex-up,
+    // ZTF FP is the inverted variant. FP rows don't carry a stamp
+    // identifier, so clicks on them are no-ops.
+    const fpRotation = survey === "ztf" ? 180 : 0;
     const fp = (fpBands || []).map((b) => ({
       label: `${b.name} (FP)`,
       $survey: survey,
@@ -609,6 +613,7 @@
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderWidth: 1,
       pointStyle: "triangle",
+      rotation: fpRotation,
       showLine: false,
       pointRadius: 3,
       pointHoverRadius: 5,
@@ -671,9 +676,64 @@
     return out;
   }
 
+  // Custom-event hooks for downstream panels (e.g. position residuals)
+  // that derive from this chart's `$lcRaw` / `$lcXRaw` and the LC legend's
+  // visibility. Two distinct events so consumers can do the cheap thing
+  // when only the visible subset shifted (`lc:visibilityChanged`) vs the
+  // full rebuild needed when bands themselves arrive or change
+  // (`lc:dataChanged`). Both carry the canvas id in detail so multi-LC
+  // pages (none today) can disambiguate.
+  function emitVisibilityChanged(chart) {
+    const id = chart && chart.canvas ? chart.canvas.id : null;
+    document.dispatchEvent(new CustomEvent("lc:visibilityChanged", {
+      detail: { canvasId: id },
+    }));
+  }
+
+  function emitDataChanged(chart) {
+    const id = chart && chart.canvas ? chart.canvas.id : null;
+    document.dispatchEvent(new CustomEvent("lc:dataChanged", {
+      detail: { canvasId: id },
+    }));
+  }
+
+  // Stable per-dataset key used to remember legend visibility across
+  // dataset rebuilds. (survey, kind, label) is invariant under every
+  // projection toggle (Flux/Mag, Diff/Sci, App/Abs, Obs/Der, Fold) and
+  // also across the deferred FP / cross-survey arrivals — only the
+  // projected `data` array changes between rebuilds, never the identity.
+  function visibilityKey(ds) {
+    return `${ds.$survey || ""}|${ds.$kind || ""}|${ds.label || ""}`;
+  }
+
+  function snapshotVisibility(chart) {
+    const out = new Map();
+    const ds = chart.data && chart.data.datasets;
+    if (!ds) return out;
+    for (let i = 0; i < ds.length; i++) {
+      out.set(visibilityKey(ds[i]), !chart.isDatasetVisible(i));
+    }
+    return out;
+  }
+
+  function applyVisibility(chart, snapshot) {
+    if (!snapshot || snapshot.size === 0) return;
+    const ds = chart.data.datasets;
+    for (let i = 0; i < ds.length; i++) {
+      const key = visibilityKey(ds[i]);
+      if (snapshot.has(key)) {
+        chart.getDatasetMeta(i).hidden = snapshot.get(key);
+      }
+    }
+  }
+
   function applyModes(chart) {
     const raw = chart.$lcRaw;
     if (!raw) return;
+    // Snapshot legend toggles BEFORE we tear the datasets array down — index-
+    // keyed `meta.hidden` would otherwise smear onto the wrong rebuilt entry
+    // when the layout shifts (overlay armed, FP arrived, DR turned on, etc.).
+    const visibility = snapshotVisibility(chart);
     const axisMode = chart.$lcMode;
     const sourceMode = chart.$lcSource;
     const distMod = computeDistMod(chart);
@@ -704,6 +764,10 @@
       : [];
     const overlayDatasets = buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod);
     chart.data.datasets = [...baseDatasets, ...xDatasets, ...overlayDatasets];
+    // New entries (e.g. just-arrived FP / xsurvey / freshly-armed overlay)
+    // aren't in the snapshot and stay visible by default. Existing keys
+    // restore whatever the legend toggled them to before the rebuild.
+    applyVisibility(chart, visibility);
     renderOverlayInfo(chart);
     const x = chart.options.scales.x;
     if (foldPeriod) {
@@ -877,6 +941,7 @@
                   ci.getDatasetMeta(i).hidden = anyVisible ? true : false;
                 }
                 ci.update();
+                emitVisibilityChanged(ci);
                 return;
               }
               const meta = ci.getDatasetMeta(legendItem.datasetIndex);
@@ -884,6 +949,7 @@
                 ? !ci.data.datasets[legendItem.datasetIndex].hidden
                 : null;
               ci.update();
+              emitVisibilityChanged(ci);
             },
             labels: {
               color: "#c9d1d9",
@@ -938,6 +1004,11 @@
                     strokeStyle: stroke,
                     lineWidth: ds.borderWidth || 1,
                     pointStyle: ds.pointStyle || pointStyleFor(survey),
+                    // Mirror the dataset's marker rotation into the legend
+                    // (ZTF FP triangles render apex-down on the chart, so
+                    // their legend swatch must too — otherwise LSST FP and
+                    // ZTF FP look identical in the legend).
+                    rotation: ds.rotation || 0,
                     fontColor,
                     // Always false: Chart.js applies strikethrough when
                     // hidden=true. Real visibility is preserved on the
@@ -1087,6 +1158,10 @@
     // the live state even after HX-Push-Url wiped lc_* on the swap.
     applyModes(chart);
     cacheAndPushLcState(chart);
+    // First-paint signal for downstream panels (position residuals etc.)
+    // that derive from $lcRaw / $lcXRaw — they listen on this and can
+    // build their initial render against whatever bands the server sent.
+    emitDataChanged(chart);
 
     // Kick off the Milky-Way E(B-V) fetch if we have coords and the input
     // is still empty (don't clobber a user-entered override OR a restored
@@ -1479,8 +1554,14 @@
     // standard `comment="#"` option. Units and conventions are explicit
     // here so the column names can stay terse.
     lines.push("# ALeRCE light curve export");
-    lines.push(`# oid: ${oid}`);
-    lines.push(`# survey: ${survey}`);
+    // oid is quoted in the comment so visual inspection signals the same
+    // intent the data rows do: this is a string, not a number — LSST oids
+    // are 18-digit ints that some consumers (Excel especially) will silently
+    // coerce to scientific notation if treated as numeric.
+    lines.push(`# oid: "${oid}"`);
+    lines.push(`# primary_survey: ${survey}`);
+    lines.push("# note: per-row 'survey' column is authoritative; cross-survey rows (when present) carry the matched survey + oid.");
+    lines.push("# string_columns: oid, candid (LSST values are 64-bit identifiers; load with dtype={'oid': str, 'candid': str} in pandas, or pre-format as Text in Excel)");
     lines.push(`# downloaded_at: ${now.toISOString()}`);
     lines.push("# flux_unit: nJy (AB ZP = 31.4)");
     lines.push("# mag_unit: AB");
@@ -1513,13 +1594,19 @@
             const key = `${axis}_${source}_${dist}_${ext}`;
             dataCols.push(key, `e_${key}`);
           }
-    lines.push(["phot_type", "band", "mjd", "identifier", ...dataCols].join(","));
+    lines.push(["phot_type", "survey", "oid", "candid", "band", "mjd", ...dataCols].join(","));
 
     // Per-row: call projectPoint for each of the 16 combinations with the
     // appropriate distmod/extinction. projectPoint returns null when the
     // source flux is null (e.g. sci columns on a point without science
     // photometry, or mag on negative diff flux) → the cell stays empty.
-    const emit = (phot_type, bandList) => {
+    const emit = (phot_type, srcSurvey, srcOid, bandList) => {
+      // Both oid and candid are always quoted: LSST oids and measurement_ids
+      // are 64-bit integers that overflow IEEE 754 doubles, so any consumer
+      // that auto-detects numeric columns (Excel, naive pandas) would
+      // silently corrupt them. The quotes force string treatment.
+      // Neither contains quotes themselves so no escaping is needed.
+      const oidCell = srcOid != null ? `"${String(srcOid)}"` : "";
       for (const band of bandList || []) {
         const A_band = extByBand[band.name] || 0;
         for (const p of band.points || []) {
@@ -1543,18 +1630,28 @@
                   if (!proj) { cells.push("", ""); continue; }
                   cells.push(fmtNum(proj.y), fmtNum(proj.e));
                 }
-          const ident = p.identifier != null ? String(p.identifier) : "";
-          lines.push([phot_type, band.name, p.mjd, ident, ...cells].join(","));
+          const candCell = p.identifier != null ? `"${String(p.identifier)}"` : "";
+          lines.push([phot_type, srcSurvey, oidCell, candCell, band.name, p.mjd, ...cells].join(","));
         }
       }
     };
-    emit("alert_detection", raw.bands);
-    emit("forced_photometry", raw.fpBands);
+    emit("alert_detection", survey, oid, raw.bands);
+    emit("forced_photometry", survey, oid, raw.fpBands);
     // Only export ZTF DR when the user has it turned on — otherwise they'd
     // get archival points they never asked for, and in Diff mode those
     // points would silently drop (DR has no difference flux) making the
-    // file subtly inconsistent with the plot.
-    if (chart.$lcDrShown) emit("ztf_dr", chart.$lcDrBands);
+    // file subtly inconsistent with the plot. DR shares the primary oid
+    // (it's archival photometry of the same object).
+    if (chart.$lcDrShown) emit("ztf_dr", survey, oid, chart.$lcDrBands);
+    // Cross-survey rows (matched counterpart from the other telescope) ride
+    // along when present so the file mirrors what the chart shows. The
+    // per-row `survey` + `oid` columns distinguish them from the primary.
+    const xRaw = chart.$lcXRaw;
+    if (xRaw && xRaw.survey) {
+      const xOid = chart.$lcXOid;
+      emit("alert_detection", xRaw.survey, xOid, xRaw.bands);
+      emit("forced_photometry", xRaw.survey, xOid, xRaw.fpBands);
+    }
 
     const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1623,6 +1720,11 @@
       fpBands: bundle.forced_phot_bands || [],
     };
     applyModes(chart);
+    // FP arrival can also bring NEW per-detection rows (FP records the
+    // service didn't have at synchronous render time), so signal a data
+    // change too — the residuals panel needs to re-derive against the
+    // new band points, not just react to a visibility shift.
+    emitDataChanged(chart);
   };
 
   // Splice the matched cross-survey LC into the chart. Payload is the same
@@ -1647,6 +1749,7 @@
     };
     chart.$lcXOid = bundle.oid || null;
     applyModes(chart);
+    emitDataChanged(chart);
     // Basic-info placeholder lives in a sibling panel of the LC; safe to
     // skip silently if the panel isn't in the DOM (e.g. listing view) or if
     // the placeholder is wired to a different OID (stale fragment during a

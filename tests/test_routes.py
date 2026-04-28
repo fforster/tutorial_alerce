@@ -1511,70 +1511,28 @@ def test_probability_upstream_error(client, monkeypatch):
     assert "Upstream error" in r.text
 
 
-def test_coord_residuals_renders_canvas_and_colorbar(client, monkeypatch):
-    async def fake_coord(*, survey, oid):
-        return {
-            "points": [
-                {"d_ra": -0.3, "d_dec": 0.1, "mjd": 60000.0, "band": "g",
-                 "identifier": "111", "has_stamp": True},
-                {"d_ra": 0.6, "d_dec": -0.2, "mjd": 60100.0, "band": "r",
-                 "identifier": "222", "has_stamp": True},
-            ],
-            "n_points": 2,
-            "mean_ra": 150.0, "mean_dec": 30.0,
-            "mjd_min": 60000.0, "mjd_max": 60100.0,
-        }
-
-    monkeypatch.setattr(
-        "src.routes.htmx.coord_residuals_service.get_coord_residuals",
-        fake_coord,
-    )
+def test_coord_residuals_renders_static_shell(client):
+    """Position-residuals panel is now a static shell — `coord_residuals.js`
+    derives the scatter from the live LC chart's `$lcRaw` / `$lcXRaw` and
+    re-renders on `lc:visibilityChanged`. The endpoint just stamps the
+    canvas + the data-lc-target hook the JS uses to find the LC chart;
+    no upstream fetch happens here."""
     r = client.get("/htmx/coord_residuals?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
     assert 'id="coord-canvas-ZTF21abc"' in r.text
-    assert "data-coords=" in r.text
-    # 2 pts label appears with the count.
-    assert "2 pts" in r.text
-    # Colorbar gradient + MJD endpoints present.
+    assert 'data-lc-target="lc-canvas-ZTF21abc"' in r.text
+    # The colorbar is still server-rendered (purely decorative — the
+    # mapping is the same regardless of the data).
     assert "linear-gradient" in r.text
-    assert "MJD 60000.00" in r.text
-    assert "MJD 60100.00" in r.text
-
-
-def test_coord_residuals_empty_shows_message(client, monkeypatch):
-    async def fake_coord(*, survey, oid):
-        return {
-            "points": [], "n_points": 0,
-            "mean_ra": None, "mean_dec": None,
-            "mjd_min": None, "mjd_max": None,
-        }
-
-    monkeypatch.setattr(
-        "src.routes.htmx.coord_residuals_service.get_coord_residuals",
-        fake_coord,
-    )
-    r = client.get("/htmx/coord_residuals?oid=x&survey_id=lsst")
-    assert r.status_code == 200
-    assert "Not enough detections" in r.text
-    assert "coord-residuals-canvas" not in r.text
+    # No baked-in data: the scatter is built client-side.
+    assert "data-coords=" not in r.text
+    # Initial count placeholder reads "0 pts" until the LC populates.
+    assert "0 pts" in r.text
 
 
 def test_coord_residuals_rejects_unknown_survey(client):
     r = client.get("/htmx/coord_residuals?oid=x&survey_id=panstarrs")
     assert r.status_code == 400
-
-
-def test_coord_residuals_upstream_error(client, monkeypatch):
-    async def fake_coord(*, survey, oid):
-        raise RuntimeError("lightcurve api down")
-
-    monkeypatch.setattr(
-        "src.routes.htmx.coord_residuals_service.get_coord_residuals",
-        fake_coord,
-    )
-    r = client.get("/htmx/coord_residuals?oid=x&survey_id=ztf")
-    assert r.status_code == 200
-    assert "Upstream error" in r.text
 
 
 def test_classes_select_renders_options(client):
