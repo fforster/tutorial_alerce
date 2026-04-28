@@ -6,7 +6,7 @@
   Aladin Lite v3 is loaded from CDS CDN the first time an aladin panel is
   rendered — it's a megabyte of JS and we don't want it on every page view.
 #}
-<div id="aladin-panel" class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
+<div id="aladin-panel" class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-h-full tw-flex tw-flex-col">
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-2">
     {% from "_panel_help.html.jinja" import panel_help %}
     {% call panel_help("Sky view", side="right") %}
@@ -24,10 +24,15 @@
     <div id="aladin-legend-{{ oid }}" class="tw-text-xs tw-text-text-muted tw-font-mono"></div>
   </div>
 
+  {#
+    Host fills the remaining vertical space so the panel matches the
+    stamps-panel height in this row. Aladin Lite picks up the host's
+    runtime size, so dropping the fixed 1:1 aspect doesn't break the
+    viewer — it just renders at whatever height the row ends up at.
+  #}
   {% if ra is not none and dec is not none %}
     <div
-      class="aladin-host tw-relative tw-w-full tw-bg-bg-secondary tw-rounded tw-overflow-hidden"
-      style="aspect-ratio: 1 / 1;"
+      class="aladin-host tw-relative tw-w-full tw-flex-1 tw-min-h-0 tw-bg-bg-secondary tw-rounded tw-overflow-hidden"
       data-ra="{{ ra }}"
       data-dec="{{ dec }}"
       data-oid="{{ oid }}"

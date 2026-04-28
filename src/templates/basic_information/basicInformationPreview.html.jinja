@@ -187,13 +187,16 @@
   {% endif %}
 
   {#
-    Bottom action row: Show features + Other archives. The coord-system
-    cycler used to live here as an "Eq" button — it's now folded into the
-    RA/Dec labels above, so the row only renders when features or archives
-    are relevant.
+    Bottom action row: Show features + Other archives, with an Airmass
+    button on its own row below. The coord-system cycler used to live
+    here as an "Eq" button — it's now folded into the RA/Dec labels
+    above, so the row only renders when features, archives, or coords
+    (which gate the Airmass button) are relevant.
   #}
-  {% if has_features or info.archives %}
-    <div class="tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-flex tw-items-center tw-gap-2 tw-flex-wrap">
+  {% set has_coords = info.ra is not none and info.dec is not none %}
+  {% if has_features or info.archives or has_coords %}
+    <div class="tw-mt-3 tw-pt-3 tw-border-t tw-border-border tw-flex tw-flex-col tw-gap-2">
+    <div class="tw-flex tw-items-center tw-gap-2 tw-flex-wrap">
       {% if has_features %}
       {#
         hx-indicator="#features-loading" reveals the spinner next to the
@@ -248,6 +251,26 @@
         </div>
       </details>
       {% endif %}
+    </div>
+    {#
+      Airmass row — sits on its own line beneath "Show features" so the
+      button is visible even when the action row above wraps to two lines.
+      Toggles the airmass overlay panel that lives in the same grid cell
+      as the position-residuals plot. Mutually exclusive with the
+      periodogram panel; coordinates are required (no point computing
+      airmass without an object position).
+    #}
+    {% if has_coords %}
+    <div class="tw-flex tw-items-center tw-gap-2 tw-flex-wrap">
+      <button
+        type="button"
+        class="basic-info-airmass-btn tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+        onclick="window.toggleAirmassPanel && window.toggleAirmassPanel('{{ info.oid }}', {{ info.ra }}, {{ info.dec }})"
+        title="Show this object's airmass evolution over a UTC night for a chosen observatory (replaces the position-residuals panel)."
+        aria-pressed="false"
+      >Airmass</button>
+    </div>
+    {% endif %}
     </div>
   {% endif %}
 </div>

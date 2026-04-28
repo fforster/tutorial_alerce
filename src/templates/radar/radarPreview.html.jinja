@@ -4,7 +4,7 @@
   We embed every classifier group as JSON on the canvas so the picker can
   swap between them without another server round trip.
 #}
-<div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4">
+<div class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4 tw-h-full tw-flex tw-flex-col">
   <div class="tw-flex tw-flex-col tw-items-start tw-gap-2 tw-mb-3">
     {% from "_panel_help.html.jinja" import panel_help %}
     {% call panel_help("Probabilities") %}
@@ -36,8 +36,15 @@
     {% endif %}
   </div>
 
+  {#
+    Canvas wrapper fills the remaining vertical space so the panel matches
+    the stamps-panel row height (set by the stamps' aspect-square cells).
+    Chart.js sizes itself to the parent box, so dropping the fixed
+    aspect-square keeps the polygon legible at whatever height the row ends
+    up at.
+  #}
   {% if ctx.groups %}
-    <div class="tw-relative tw-w-full tw-aspect-square">
+    <div class="tw-relative tw-w-full tw-flex-1 tw-min-h-0">
       <canvas
         id="radar-canvas-{{ oid }}"
         class="radar-canvas"

@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..services import classifiers as classifiers_service
 from ..services import coord_residuals as coord_residuals_service
+from ..services import crossmatch as crossmatch_service
 from ..services import features as features_service
 from ..services import lightcurve as lightcurve_service
 from ..services import object_info as object_info_service
@@ -623,6 +624,33 @@ async def object_information(request: Request, oid: str, survey_id: str) -> HTML
             "survey_id": survey_id,
             "has_features": SC(survey_id).features_url_template is not None,
         },
+    )
+
+
+@router.get("/htmx/crossmatch", response_class=HTMLResponse)
+async def crossmatch(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Lazy-loaded catsHTM crossmatch panel — fired by the bottom-of-page
+    `<details>` slot the first time the user expands it. The route resolves
+    the object's ra/dec via `object_info` (so the container template doesn't
+    need to know coordinates) and then defers to the crossmatch service for
+    the catsHTM call + shaping. catsHTM is not on the critical path: any
+    upstream failure is rendered into the same panel as an error string,
+    not propagated as a 500."""
+    _validate_survey(survey_id)
+    try:
+        info = await object_info_service.get_object_info(survey=survey_id, oid=oid)
+    except Exception as e:
+        log.exception("crossmatch object_info failed")
+        return HTMLResponse(
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
+        )
+    ctx = await crossmatch_service.get_crossmatch(
+        ra=info.get("ra"), dec=info.get("dec"),
+    )
+    return templates.TemplateResponse(
+        request,
+        "crossmatch/crossmatchPanel.html.jinja",
+        {"ctx": ctx, "oid": oid, "survey_id": survey_id},
     )
 
 

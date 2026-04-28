@@ -1,0 +1,100 @@
+{#
+  Airmass-calculator panel — included (hidden) inside #airmass-slot in the
+  detail container. Activated by the "Airmass" button in the Basic
+  Information panel via window.toggleAirmassPanel(oid, ra, dec) which
+  copies the object's RA/Dec onto `data-airmass-panel` so the Compute
+  button can re-render after coord changes.
+
+  All math + chart drawing lives in static/js/airmass.js; this template is
+  pure markup. The data-am-* attributes are the binding contract between
+  the template and the JS module — keep them in sync.
+#}
+<div
+  data-airmass-panel
+  class="tw-h-full tw-flex tw-flex-col tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-3 tw-text-xs tw-min-h-0"
+>
+  <div class="tw-flex tw-items-center tw-justify-between tw-mb-2">
+    {% from "_panel_help.html.jinja" import panel_help %}
+    {% call panel_help("Airmass calculator", side="right") %}
+      <div class="tw-font-semibold tw-mb-1">What's plotted</div>
+      <p class="tw-mb-3 tw-text-text-secondary">
+        Airmass evolution across one UTC night for the selected
+        observatory: object track in blue, Moon in dashed yellow.
+        Background shading shows daylight (solid blue) → civil →
+        nautical → astronomical twilight; true night is unshaded.
+        Reference lines mark X=1.5 / 2 / 3.
+      </p>
+      <div class="tw-font-semibold tw-mb-1">Inputs</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">Observatory</strong> — preset list (defaults to Rubin / LSST). Pick "— Custom —" to enter coordinates manually.</li>
+        <li><strong class="tw-text-text-primary">Latitude / Longitude / Elevation</strong> — auto-filled from the preset; editing any of them switches the preset back to "Custom".</li>
+        <li><strong class="tw-text-text-primary">UTC Date</strong> — night start (noon UTC → noon UTC next day, sampled every 15 min).</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Computing</div>
+      <p class="tw-text-text-secondary">
+        Click <strong class="tw-text-text-primary">Compute</strong> to refresh after changing any input. Math is fully client-side: low-precision Meeus Sun + Moon, Pickering (2002) airmass.
+      </p>
+    {% endcall %}
+    <button
+      type="button"
+      data-am-close
+      class="tw-text-text-muted hover:tw-text-text-primary tw-text-base tw-leading-none tw-px-2"
+      title="Close airmass calculator (re-shows position residuals)."
+      aria-label="Close airmass calculator"
+    >×</button>
+  </div>
+
+  {# Row 1: observatory + lat/lon/elev. #}
+  <div class="tw-flex tw-flex-wrap tw-items-center tw-gap-1.5 tw-text-[11px] tw-mb-1">
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted">
+      Obs
+      <select
+        data-am-obs
+        class="tw-max-w-[12rem] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-1 tw-py-0 tw-text-text-primary"
+        title="Pick an observatory preset; Custom keeps user-entered coords."
+      ></select>
+    </label>
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Site latitude (degrees, +N).">
+      Lat
+      <input data-am-lat type="number" step="0.0001" placeholder="-30.2447"
+        class="tw-w-16 tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono" />
+    </label>
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Site longitude (degrees, +E).">
+      Lon
+      <input data-am-lon type="number" step="0.0001" placeholder="-70.7494"
+        class="tw-w-16 tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono" />
+    </label>
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Elevation (m). Currently informational — Pickering's airmass is altitude-independent.">
+      Elev
+      <input data-am-elev type="number" step="1" placeholder="2647"
+        class="tw-w-14 tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono" />
+    </label>
+  </div>
+
+  {# Row 2: night UTC date + Compute + status. #}
+  <div class="tw-flex tw-flex-wrap tw-items-center tw-gap-1.5 tw-text-[11px] tw-mb-2">
+    <label class="tw-inline-flex tw-items-center tw-gap-1 tw-text-text-muted"
+      title="Night start (UTC). Time grid spans noon → noon UTC next day, every 15 min.">
+      Date
+      <input data-am-date type="date"
+        class="tw-px-1 tw-py-0 tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono" />
+    </label>
+    <button
+      type="button"
+      data-am-compute
+      class="tw-px-2 tw-py-0.5 tw-bg-accent tw-text-bg-primary tw-rounded tw-font-medium hover:tw-bg-accent-hover"
+      title="Compute the night's airmass curve for the chosen site + date."
+    >Compute</button>
+    <span data-am-status class="tw-text-text-muted tw-font-mono tw-text-[10px] tw-truncate"
+      title="Last-computed inputs (date + object coords) — confirms what's on screen."></span>
+  </div>
+
+  {# Canvas — flex-1 so it grows to fill the slot height. #}
+  <div class="tw-relative tw-flex-1 tw-min-h-[10rem]"
+    title="Object airmass (solid blue) and Moon airmass (dashed yellow) vs. UTC time. Background shading = twilight; reference lines = X=1.5/2/3.">
+    <canvas class="airmass-canvas tw-w-full tw-h-full"></canvas>
+  </div>
+</div>

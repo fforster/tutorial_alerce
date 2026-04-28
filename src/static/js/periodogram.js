@@ -656,10 +656,14 @@
   window.togglePeriodogramPanel = function (lcCanvasId) {
     const cr = document.getElementById("coord-residuals-slot");
     const pg = document.getElementById("periodogram-slot");
+    // Airmass shares the same cell — keep all three mutually exclusive
+    // so opening periodogram never leaves airmass on screen behind it.
+    const am = document.getElementById("airmass-slot");
     if (!cr || !pg) return;
     const showPg = pg.classList.contains("tw-hidden");
     if (showPg) {
       cr.classList.add("tw-hidden");
+      if (am) am.classList.add("tw-hidden");
       pg.classList.remove("tw-hidden");
     } else {
       pg.classList.add("tw-hidden");

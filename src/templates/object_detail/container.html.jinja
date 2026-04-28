@@ -43,12 +43,13 @@
       </div>
     </div>
     {#
-      Position residuals + periodogram share the same grid cell so
-      togglePeriodogramPanel (driven by the LC toolbar's Periodogram
-      button) flips between them without disturbing the rest of the
-      layout. The periodogram slot is hidden by default; it carries the
-      panel template inline so the canvas is ready when the toggle first
-      flips it on.
+      Position residuals + periodogram + airmass share the same grid cell.
+      Only one is visible at a time; togglePeriodogramPanel and
+      toggleAirmassPanel manage the mutual-exclusion (and which button is
+      highlighted) via tw-hidden. Periodogram is driven from the LC
+      toolbar's Periodogram button; Airmass from the Basic Information
+      panel's Airmass button. Panels carry their templates inline so the
+      canvas is ready for Chart.js the first time the toggle flips it on.
     #}
     <div class="tw-col-span-1 tw-min-h-0 tw-min-w-0">
       <div
@@ -64,6 +65,9 @@
       </div>
       <div id="periodogram-slot" class="tw-hidden tw-h-full">
         {% include "periodogram/periodogramPreview.html.jinja" %}
+      </div>
+      <div id="airmass-slot" class="tw-hidden tw-h-full">
+        {% include "airmass/airmassPanel.html.jinja" %}
       </div>
     </div>
 
@@ -100,6 +104,41 @@
         Loading sky view…
       </div>
     </div>
+  </div>
+
+  {#
+    Crossmatch — full-width collapsible at the bottom of the detail page.
+    Native <details>/<summary> handles the open/close UI; htmx fires the
+    fetch the first time the panel opens (`toggle once from:#crossmatch-details`)
+    so we never call catsHTM unless the user asks. After the first load
+    the body is cached in the DOM — re-collapsing keeps the data ready.
+    catsHTM is the only catalog source for now; future xmatch sources
+    will surface as additional cards inside this same panel.
+  #}
+  <div id="crossmatch-slot" class="tw-mt-1">
+    <details
+      id="crossmatch-details"
+      class="tw-bg-bg-card tw-border tw-border-border tw-rounded"
+    >
+      <summary
+        class="tw-cursor-pointer tw-px-4 tw-py-3 tw-text-sm tw-font-medium tw-text-text-primary hover:tw-bg-bg-tertiary tw-flex tw-items-center tw-gap-2"
+      >
+        <span>Crossmatch &mdash; catsHTM (30&Prime;)</span>
+        <span class="tw-text-xs tw-text-text-muted">click to expand</span>
+      </summary>
+      <div
+        id="crossmatch-body"
+        class="tw-px-4 tw-pb-4 tw-pt-3 tw-text-xs tw-border-t tw-border-border"
+        hx-get="{{ API_URL }}/htmx/crossmatch?oid={{ oid }}&survey_id={{ survey_id }}"
+        hx-trigger="toggle once from:#crossmatch-details"
+        hx-swap="innerHTML"
+      >
+        <div class="tw-text-text-muted tw-py-3">
+          <i class="fa-solid fa-spinner fa-spin tw-mr-1"></i>
+          Loading catsHTM crossmatch&hellip;
+        </div>
+      </div>
+    </details>
   </div>
 
   {# Overlay slot for the "Show features" modal — stays empty until the

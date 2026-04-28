@@ -425,6 +425,18 @@ def test_detail_renders_container(client):
     assert 'id="periodogram-slot"' in r.text
     assert 'data-pg-panel' in r.text
     assert 'data-lc-target="lc-canvas-ZTF21abc"' in r.text
+    # Airmass panel shares the same cell as periodogram + position-residuals;
+    # its toggle is fired from the basic-info "Airmass" button.
+    assert 'id="airmass-slot"' in r.text
+    assert "data-airmass-panel" in r.text
+    assert "airmass-canvas" in r.text
+    # Crossmatch slot — collapsed <details> at the bottom of the page that
+    # lazy-loads /htmx/crossmatch the first time it's expanded.
+    assert 'id="crossmatch-slot"' in r.text
+    assert 'id="crossmatch-details"' in r.text
+    assert 'id="crossmatch-body"' in r.text
+    assert "/htmx/crossmatch?oid=ZTF21abc&survey_id=ztf" in r.text
+    assert "toggle once from:#crossmatch-details" in r.text
     # The Back button + prev/next arrows used to live in this fragment but
     # were promoted to the global header (#detail-nav-bar in index.html.jinja)
     # so the detail panels reclaim that row of vertical space.
@@ -481,6 +493,35 @@ def test_object_information_renders_basic_fields(client, monkeypatch):
     # ZTF has a features endpoint, so the "Show features" button should render.
     assert "Show features" in r.text
     assert "/htmx/features?oid=ZTF21abc&survey_id=ztf" in r.text
+    # Airmass button — rendered when ra/dec are known; calls the toggle with
+    # oid + numeric coords so the panel can compute without re-fetching.
+    assert "basic-info-airmass-btn" in r.text
+    assert "toggleAirmassPanel" in r.text
+    assert "'ZTF21abc', 180.0, -30.0" in r.text
+
+
+def test_object_information_hides_airmass_button_without_coords(client, monkeypatch):
+    """Airmass needs an object position; an LSST row missing meanra/meandec
+    must not render the button (clicking would compute Moon-only, which is
+    misleading)."""
+    async def fake_info(*, survey, oid):
+        return {
+            "oid": oid, "survey": survey, "ra": None, "dec": None,
+            "ra_hms": None, "dec_dms": None,
+            "l_gal": None, "b_gal": None,
+            "lambda_ecl": None, "beta_ecl": None,
+            "firstmjd": 60000.0, "lastmjd": 60001.0, "delta_mjd": 1.0,
+            "n_det": 1, "n_non_det": 0, "n_forced": None,
+            "corrected": None, "stellar": None, "archives": [],
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
+    )
+    r = client.get("/htmx/object_information?oid=x&survey_id=lsst")
+    assert r.status_code == 200
+    assert "basic-info-airmass-btn" not in r.text
+    assert "toggleAirmassPanel" not in r.text
 
 
 def test_object_information_hides_features_button_for_lsst(client, monkeypatch):
@@ -664,6 +705,123 @@ def test_features_route_renders_upstream_error(client, monkeypatch):
     r = client.get("/htmx/features?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
     assert "Upstream error" in r.text
+
+
+def test_crossmatch_route_renders_catalog_tables(client, monkeypatch):
+    """Happy path: object_info supplies coords, crossmatch service returns
+    a couple of catalogs, the panel renders one card per catalog with the
+    field key/value cells stamped in."""
+    async def fake_info(*, survey, oid):
+        return {"ra": 180.0, "dec": 0.5}
+
+    async def fake_xmatch(*, ra, dec, radius=30.0):
+        assert (ra, dec) == (180.0, 0.5)
+        return {
+            "available": True, "ra": ra, "dec": dec, "radius": radius,
+            "catalogs": [
+                {"name": "DECaLS", "fields": [
+                    {"key": "RA", "value": "180.000180", "unit": "deg"},
+                    {"key": "distance", "value": "2.525669", "unit": "arcsec"},
+                ]},
+                {"name": "GAIA/DR2", "fields": [
+                    {"key": "Mag_G", "value": "19.715656", "unit": "mag"},
+                ]},
+            ],
+            "n_catalogs": 2, "error": None,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.crossmatch_service.get_crossmatch", fake_xmatch,
+    )
+    r = client.get("/htmx/crossmatch?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "DECaLS" in r.text
+    assert "GAIA/DR2" in r.text
+    assert "180.000180" in r.text
+    assert "2.525669" in r.text
+    assert "Mag_G" in r.text
+    assert "[deg]" in r.text
+    assert "[arcsec]" in r.text
+    # Banner shows the catalog count + the radius the user is seeing.
+    assert "2 catalogs matched" in r.text
+
+
+def test_crossmatch_route_no_coords_renders_hint(client, monkeypatch):
+    """LSST objects sometimes lack ra/dec — render the "no coords" hint
+    instead of trying to call catsHTM with NaNs."""
+    async def fake_info(*, survey, oid):
+        return {"ra": None, "dec": None}
+
+    async def fake_xmatch(*, ra, dec, radius=30.0):
+        return {
+            "available": False, "ra": None, "dec": None, "radius": radius,
+            "catalogs": [], "n_catalogs": 0, "error": None,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.crossmatch_service.get_crossmatch", fake_xmatch,
+    )
+    r = client.get("/htmx/crossmatch?oid=x&survey_id=lsst")
+    assert r.status_code == 200
+    assert "No coordinates" in r.text
+
+
+def test_crossmatch_route_renders_no_match_message(client, monkeypatch):
+    """Empty catsHTM result → friendly message instead of a bare panel."""
+    async def fake_info(*, survey, oid):
+        return {"ra": 0.0, "dec": 0.0}
+
+    async def fake_xmatch(*, ra, dec, radius=30.0):
+        return {
+            "available": True, "ra": ra, "dec": dec, "radius": radius,
+            "catalogs": [], "n_catalogs": 0, "error": None,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.crossmatch_service.get_crossmatch", fake_xmatch,
+    )
+    r = client.get("/htmx/crossmatch?oid=x&survey_id=ztf")
+    assert r.status_code == 200
+    assert "No crossmatch results" in r.text
+
+
+def test_crossmatch_route_renders_upstream_error(client, monkeypatch):
+    """catsHTM down → render the error string so the user sees we tried
+    rather than seeing "No crossmatch results" (which would imply we got
+    a real empty response)."""
+    async def fake_info(*, survey, oid):
+        return {"ra": 1.0, "dec": 2.0}
+
+    async def fake_xmatch(*, ra, dec, radius=30.0):
+        return {
+            "available": True, "ra": ra, "dec": dec, "radius": radius,
+            "catalogs": [], "n_catalogs": 0, "error": "boom",
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info", fake_info,
+    )
+    monkeypatch.setattr(
+        "src.routes.htmx.crossmatch_service.get_crossmatch", fake_xmatch,
+    )
+    r = client.get("/htmx/crossmatch?oid=x&survey_id=ztf")
+    assert r.status_code == 200
+    assert "catsHTM error" in r.text
+    assert "boom" in r.text
+
+
+def test_crossmatch_route_rejects_unknown_survey(client):
+    r = client.get("/htmx/crossmatch?oid=x&survey_id=panstarrs")
+    assert r.status_code == 400
 
 
 def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
