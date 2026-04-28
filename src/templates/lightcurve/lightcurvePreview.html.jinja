@@ -237,12 +237,12 @@
 
   {#
     Deferred-load status strip. Three independent fetches (FP, features,
-    coords) fire on load and replace their own span via outerHTML — the
-    spinner stops the moment each piece arrives, and each fragment also
-    runs an inline script that hands its payload to `lcSetBundle`,
-    `lcSetFeatures`, or `lcSetCoords`. The canvas is already on screen
-    by this point, so the user sees detections immediately and the rest
-    fills in within a few seconds.
+    coords) fire on load and replace their own span via outerHTML; each
+    fragment is now script-only and calls `lcMaybeHideLoadingStrip`, which
+    collapses the strip once no `[hx-trigger~="load"]` placeholder remains
+    — handing the freed vertical space back to the chart's flex-1 box. The
+    canvas is already on screen by this point, so the user sees detections
+    immediately and the loaders quietly disappear as each piece lands.
   #}
   {% if lc.n_det > 0 or (lc.n_fp or 0) > 0 %}
     <div
@@ -267,6 +267,12 @@
         hx-swap="outerHTML"
         title="Loading object coordinates (drives the dust proxy and ZTF DR overlay)…"
       ><span class="tw-inline-block tw-animate-spin">◐</span> coords…</span>
+      <span
+        hx-get="{{ API_URL }}/htmx/lc_xsurvey?oid={{ oid }}&survey_id={{ survey_id }}"
+        hx-trigger="load"
+        hx-swap="outerHTML"
+        title="Looking up the matching source on the other survey (cone-search 3″)…"
+      ><span class="tw-inline-block tw-animate-spin">◐</span> xsurvey…</span>
     </div>
     <div class="tw-relative tw-flex-1 tw-min-h-[15.84rem]">
       <canvas

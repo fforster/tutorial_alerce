@@ -26,6 +26,19 @@
   const AB_ZP_NJY = 31.4;
   const LN10_OVER_2P5 = Math.log(10) / 2.5;
 
+  // Per-survey marker shape for *detections*. FP keeps its open-triangle
+  // marker across surveys (the "FP-ness" of a point is more important than
+  // its survey of origin for pattern recognition); the survey of origin is
+  // disambiguated by the legend grouping + the tooltip prefix. DR is ZTF-
+  // only by construction, so it inherits ZTF's shape.
+  const SURVEY_POINT_STYLE = { lsst: "circle", ztf: "rect" };
+  function pointStyleFor(survey) {
+    return SURVEY_POINT_STYLE[survey] || "circle";
+  }
+  function surveyLabel(survey) {
+    return survey === "lsst" ? "LSST" : (survey === "ztf" ? "ZTF" : (survey || ""));
+  }
+
   // Append an alpha byte to a #RRGGBB color so DR can reuse the band palette
   // while reading as clearly subordinate to det/FP. Non-hex colors pass through.
   function withAlpha(color, alpha) {
@@ -504,10 +517,19 @@
     if (!fits || !key || key === "none") return [];
     const bands = (chart.$lcRaw && chart.$lcRaw.bands) || [];
     const fpBands = (chart.$lcRaw && chart.$lcRaw.fpBands) || [];
-    if (key === "spm") return computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
-    if (key === "fleet") return computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod);
-    if (key === "tde") return computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
-    return [];
+    let traces = [];
+    if (key === "spm") traces = computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
+    else if (key === "fleet") traces = computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod);
+    else if (key === "tde") traces = computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
+    // Stamp survey + kind so the legend grouper places overlays under the
+    // primary survey's header (overlays derive from the primary's features
+    // — LSST has no features endpoint today, so in practice they're ZTF).
+    const survey = chart.$lcSurvey || "";
+    for (const t of traces) {
+      t.$survey = survey;
+      t.$kind = "overlay";
+    }
+    return traces;
   }
 
   // ── Param info strip ──────────────────────────────────────────────────────
@@ -554,7 +576,7 @@
     strip.classList.remove("tw-hidden");
   }
 
-  function buildDatasets(bands, fpBands, drBands, axisMode, sourceMode, distMod, extByBand, drAlpha, foldPeriod) {
+  function buildDatasets(bands, fpBands, drBands, axisMode, sourceMode, distMod, extByBand, drAlpha, foldPeriod, survey) {
     const extFor = (name) => (extByBand || {})[name] || 0;
     const project = (band) => {
       const rows = band.points
@@ -562,11 +584,15 @@
         .filter(Boolean);
       return foldPeriod ? foldDataset(rows, foldPeriod) : rows;
     };
+    const detStyle = pointStyleFor(survey);
     const det = bands.map((b) => ({
       label: b.name,
+      $survey: survey,
+      $kind: "det",
       data: project(b),
       backgroundColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
+      pointStyle: detStyle,
       showLine: false,
       pointRadius: 3,
       pointHoverRadius: 5,
@@ -576,6 +602,8 @@
     // FP rows don't carry a stamp identifier, so clicks on them are no-ops.
     const fp = (fpBands || []).map((b) => ({
       label: `${b.name} (FP)`,
+      $survey: survey,
+      $kind: "fp",
       data: project(b),
       backgroundColor: "transparent",
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
@@ -587,18 +615,22 @@
     }));
     // DR points are archival science-only photometry; carry no flux (diff),
     // so projectPoint filters them out in Diff mode automatically. Rendered
-    // as tiny 10%-alpha circles in the band color, and with a negative
-    // draw-order so det + FP always sit on top of a dense DR crossmatch.
+    // as tiny 10%-alpha markers in the band color, taking the survey's
+    // detection shape (DR is ZTF-only today, so this is a square in
+    // practice), and with a negative draw-order so det + FP always sit on
+    // top of a dense DR crossmatch.
     const alpha = (typeof drAlpha === "number" && isFinite(drAlpha)) ? drAlpha : 0.10;
     const dr = (drBands || []).map((b) => {
       const base = BAND_COLORS[b.name] || BAND_COLORS.unknown;
       return {
         label: `${b.name} (DR)`,
+        $survey: survey,
+        $kind: "dr",
         data: project(b),
         backgroundColor: withAlpha(base, alpha),
         borderColor: withAlpha(base, alpha),
         borderWidth: 1,
-        pointStyle: "circle",
+        pointStyle: detStyle,
         showLine: false,
         pointRadius: 1.5,
         pointHoverRadius: 3,
@@ -653,12 +685,25 @@
     const drBands = chart.$lcDrShown ? (chart.$lcDrBands || []) : [];
     const foldPeriod =
       chart.$lcFold === "fold" && chart.$lcPeriod > 0 ? chart.$lcPeriod : null;
+    const primarySurvey = chart.$lcSurvey || "";
     const baseDatasets = buildDatasets(
       raw.bands, raw.fpBands, drBands, axisMode, sourceMode, distMod, extByBand,
-      chart.$lcDrAlpha, foldPeriod,
+      chart.$lcDrAlpha, foldPeriod, primarySurvey,
     );
+    // Cross-survey overlay (the *other* survey's matched source). Stays empty
+    // until /htmx/lc_xsurvey lands and `lcSetCrossSurvey` populates `$lcXRaw`.
+    // Re-projects through the same axisMode/sourceMode/distMod/extByBand the
+    // primary uses so the two telescopes' photometry stays comparable on every
+    // toggle (Flux/Mag, App/Abs, Obs/Der, Fold).
+    const xRaw = chart.$lcXRaw;
+    const xDatasets = (xRaw && xRaw.survey)
+      ? buildDatasets(
+          xRaw.bands || [], xRaw.fpBands || [], [], axisMode, sourceMode,
+          distMod, extByBand, chart.$lcDrAlpha, foldPeriod, xRaw.survey,
+        )
+      : [];
     const overlayDatasets = buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod);
-    chart.data.datasets = [...baseDatasets, ...overlayDatasets];
+    chart.data.datasets = [...baseDatasets, ...xDatasets, ...overlayDatasets];
     renderOverlayInfo(chart);
     const x = chart.options.scales.x;
     if (foldPeriod) {
@@ -722,7 +767,7 @@
 
     const chart = new Chart(canvas.getContext("2d"), {
       type: "scatter",
-      data: { datasets: buildDatasets(bands, fpBands, [], initialAxisMode, initialSourceMode, null, null) },
+      data: { datasets: buildDatasets(bands, fpBands, [], initialAxisMode, initialSourceMode, null, null, null, null, data.survey || "") },
       plugins: [errorBarPlugin],
       options: {
         responsive: true,
@@ -773,16 +818,100 @@
             position: "top",
             // usePointStyle mirrors each dataset's actual marker into the
             // legend — without it, Chart.js draws a generic filled rectangle
-            // and FP triangles / DR open circles would read as "square" in
-            // the legend despite being triangles/circles on the plot.
-            // sort by datasetIndex so the negative `order` we use to push DR
-            // to the back layer doesn't also shuffle it to the front of the
-            // legend; the legend stays in array order (det → DR → FP).
+            // and FP triangles / DR markers would read as the wrong shape
+            // despite being drawn correctly on the plot.
+            //
+            // generateLabels groups datasets by `$survey` and emits a
+            // non-clickable header per group ("LSST:", "ZTF:") so the legend
+            // reads like a sentence: `LSST: u g r i z y · ZTF: g r i`. The
+            // header items carry no datasetIndex; the custom onClick below
+            // ignores those, while real items toggle dataset visibility just
+            // like Chart.js's default.
+            onClick: (_e, legendItem, legend) => {
+              const ci = legend.chart;
+              // Survey header: toggle every dataset in that survey group as
+              // a unit. "Hide all" wins when any member is currently visible
+              // (one click ⇒ everything off); "show all" only when the whole
+              // group is already hidden — mirrors Chart.js's per-item toggle
+              // semantics, just lifted to the group.
+              if (legendItem.datasetIndex == null) {
+                const survey = legendItem.$survey;
+                if (!survey) return;
+                const indices = ci.data.datasets
+                  .map((ds, i) => (ds.$survey === survey ? i : -1))
+                  .filter((i) => i >= 0);
+                if (!indices.length) return;
+                const anyVisible = indices.some((i) => ci.isDatasetVisible(i));
+                for (const i of indices) {
+                  ci.getDatasetMeta(i).hidden = anyVisible ? true : false;
+                }
+                ci.update();
+                return;
+              }
+              const meta = ci.getDatasetMeta(legendItem.datasetIndex);
+              meta.hidden = meta.hidden === null
+                ? !ci.data.datasets[legendItem.datasetIndex].hidden
+                : null;
+              ci.update();
+            },
             labels: {
               color: "#c9d1d9",
               usePointStyle: true,
               boxWidth: 10,
-              sort: (a, b) => a.datasetIndex - b.datasetIndex,
+              generateLabels: (ch) => {
+                // Group order: LSST first, then ZTF, then anything else.
+                // Within each group, preserve the dataset emission order
+                // (det → FP → DR) since that's what `buildDatasets` returns.
+                //
+                // `fontColor` is repeated per item because a custom
+                // generateLabels bypasses the global `labels.color` cascade
+                // (Chart.js only inherits when it generates the labels
+                // itself); without it the survey headers and band names
+                // render in the dataset's own color rather than whitish.
+                const TEXT = "#c9d1d9";
+                const groups = new Map();
+                ch.data.datasets.forEach((ds, i) => {
+                  const survey = ds.$survey || "";
+                  if (!groups.has(survey)) groups.set(survey, []);
+                  groups.get(survey).push({
+                    text: ds.label,
+                    fillStyle: ds.backgroundColor,
+                    strokeStyle: ds.borderColor,
+                    lineWidth: ds.borderWidth || 1,
+                    pointStyle: ds.pointStyle || pointStyleFor(survey),
+                    fontColor: TEXT,
+                    hidden: !ch.isDatasetVisible(i),
+                    datasetIndex: i,
+                  });
+                });
+                const ordered = [];
+                const surveys = ["lsst", "ztf", ...Array.from(groups.keys()).filter((s) => s !== "lsst" && s !== "ztf")];
+                for (const s of surveys) {
+                  const items = groups.get(s);
+                  if (!items || !items.length) continue;
+                  if (s) {
+                    // Header reflects group-visibility: when every member is
+                    // hidden the header renders struck-through (same affordance
+                    // Chart.js applies to a hidden series), so the user sees
+                    // "the group is off". `$survey` is the key onClick uses
+                    // to look up which datasets belong to the group.
+                    const allHidden = items.every((it) => it.hidden);
+                    ordered.push({
+                      text: `${surveyLabel(s)}:`,
+                      fillStyle: "transparent",
+                      strokeStyle: "transparent",
+                      lineWidth: 0,
+                      pointStyle: "circle",
+                      fontColor: TEXT,
+                      hidden: allHidden,
+                      $survey: s,
+                      // No datasetIndex — onClick uses that to detect headers.
+                    });
+                  }
+                  ordered.push(...items);
+                }
+                return ordered;
+              },
             },
           },
           tooltip: {
@@ -794,7 +923,12 @@
                 const xLabel = chart.$lcFold === "fold" && chart.$lcPeriod > 0
                   ? `phase ${p.x.toFixed(3)}`
                   : `MJD ${p.x.toFixed(3)}`;
-                return `${ctx.dataset.label}: ${p.y.toPrecision(4)}${err} ${unit} @ ${xLabel}`;
+                // Prefix with survey so two `g` series (one per telescope)
+                // are unambiguous in the tooltip; legend drops the prefix
+                // because it's already grouped under the survey header.
+                const sLabel = surveyLabel(ctx.dataset.$survey);
+                const prefix = sLabel ? `${sLabel} ` : "";
+                return `${prefix}${ctx.dataset.label}: ${p.y.toPrecision(4)}${err} ${unit} @ ${xLabel}`;
               },
             },
           },
@@ -811,6 +945,11 @@
       },
     });
     chart.$lcRaw = { bands, fpBands };
+    // Cross-survey overlay starts empty; lcSetCrossSurvey populates it from
+    // the deferred /htmx/lc_xsurvey response when the conesearch finds a
+    // counterpart on the other survey.
+    chart.$lcXRaw = null;
+    chart.$lcXOid = null;
     // Stashed so the CSV download can emit the survey name and the period
     // (for a fold-active export note) without re-parsing canvas.dataset.lc.
     chart.$lcSurvey = data.survey || "";
@@ -1412,6 +1551,26 @@
     applyModes(chart);
   };
 
+  // Splice the matched cross-survey LC into the chart. Payload is the same
+  // `shape_lightcurve` envelope the primary uses, plus `oid` (the matched
+  // OID on the other survey) which we stash on the chart so a future
+  // "open this on the other survey" affordance can read it back.
+  // Tolerant: empty bundle / wrong-shape / null all leave the chart alone.
+  window.lcSetCrossSurvey = function (canvasId, bundle) {
+    const canvas = document.getElementById(canvasId);
+    const chart = canvas && charts.get(canvas);
+    if (!chart || !bundle || typeof bundle !== "object") return;
+    const survey = bundle.survey;
+    if (survey !== "lsst" && survey !== "ztf") return;
+    chart.$lcXRaw = {
+      survey,
+      bands: bundle.bands || [],
+      fpBands: bundle.forced_phot_bands || [],
+    };
+    chart.$lcXOid = bundle.oid || null;
+    applyModes(chart);
+  };
+
   // Reveal + populate the Fold button and the parametric-overlay picker
   // from the deferred /htmx/lc_features response. `features` shape:
   //   { multiband_period: number|null, parametric_fits: {spm,fleet,tde} }
@@ -1504,6 +1663,18 @@
         ebvInput.dispatchEvent(new Event("input", { bubbles: true }));
       });
     }
+  };
+
+  // Hide the deferred-load status strip once every pending loader has
+  // swapped in. We detect "still pending" by looking for any descendant
+  // that htmx hasn't replaced yet (the originals carry hx-trigger="load");
+  // when none remain, we collapse the whole strip so the chart's flex-1
+  // container reclaims the vertical space.
+  window.lcMaybeHideLoadingStrip = function (oid) {
+    const strip = document.getElementById("lc-loading-status-" + oid);
+    if (!strip) return;
+    if (strip.querySelector('[hx-trigger~="load"]')) return;
+    strip.style.display = "none";
   };
 
   window.lcSetFoldPeriod = function (canvasId, period) {

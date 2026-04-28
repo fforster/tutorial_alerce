@@ -913,11 +913,12 @@ def test_lightcurve_renders_canvas_with_payload(client, monkeypatch):
     assert "value=" not in (
         r.text.split('id="lc-redshift-ZTF21abc"')[1].split(">", 1)[0]
     )
-    # Loading status strip reveals the three deferred fetches the panel
-    # depends on (FP, features, coords).
+    # Loading status strip reveals the four deferred fetches the panel
+    # depends on (FP, features, coords, cross-survey lookup).
     assert "/htmx/lc_fp?oid=ZTF21abc" in r.text
     assert "/htmx/lc_features?oid=ZTF21abc" in r.text
     assert "/htmx/lc_info?oid=ZTF21abc" in r.text
+    assert "/htmx/lc_xsurvey?oid=ZTF21abc" in r.text
 
 
 def test_lc_fp_endpoint_returns_inline_setBundle(client, monkeypatch):
@@ -998,6 +999,49 @@ def test_lc_info_endpoint_handles_missing_coords(client, monkeypatch):
     r = client.get("/htmx/lc_info?oid=ZTF21abc&survey_id=ztf")
     assert r.status_code == 200
     assert "window.lcSetCoords" not in r.text
+
+
+def test_lc_xsurvey_endpoint_returns_inline_setCrossSurvey(client, monkeypatch):
+    """Deferred cross-survey endpoint hands the matched-other-survey LC
+    bundle to `lcSetCrossSurvey` so the chart can overlay LSST + ZTF
+    photometry under one set of toggles."""
+    async def fake_bundle(*, survey, oid):
+        return {
+            "survey": "ztf",
+            "oid": "ZTF17aabhbva",
+            "bands": [{"name": "g", "points": [{
+                "mjd": 60000.0, "flux": 1000.0, "e_flux": 50.0,
+                "sci_flux": None, "e_sci_flux": None,
+                "identifier": "1", "has_stamp": False, "isdiffpos": 1,
+            }]}],
+            "forced_phot_bands": [],
+            "n_det": 1, "n_fp": 0, "has_science_flux": True,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lc_xsurvey_bundle", fake_bundle,
+    )
+    r = client.get("/htmx/lc_xsurvey?oid=313888627082919999&survey_id=lsst")
+    assert r.status_code == 200
+    assert "window.lcSetCrossSurvey" in r.text
+    assert '"lc-canvas-313888627082919999"' in r.text
+    assert "ZTF17aabhbva" in r.text
+
+
+def test_lc_xsurvey_endpoint_handles_no_match(client, monkeypatch):
+    """No counterpart on the other survey ⇒ fragment still consumes the
+    placeholder spinner (via lcMaybeHideLoadingStrip) but doesn't call
+    lcSetCrossSurvey."""
+    async def fake_bundle(*, survey, oid):
+        return None
+
+    monkeypatch.setattr(
+        "src.routes.htmx.lightcurve_service.get_lc_xsurvey_bundle", fake_bundle,
+    )
+    r = client.get("/htmx/lc_xsurvey?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert "window.lcSetCrossSurvey" not in r.text
+    assert "lcMaybeHideLoadingStrip" in r.text
 
 
 def test_lightcurve_empty_shows_message(client, monkeypatch):

@@ -5,16 +5,16 @@
   the ZTF DR archival-photometry button). `lcSetCoords` writes data-ra /
   data-dec onto both the canvas and the ZTF DR button, then triggers the
   same dust fetch the original synchronous render did.
+  No visible status is rendered; once every loader finishes,
+  `lcMaybeHideLoadingStrip` collapses the strip.
 #}
-{% if ra is not none and dec is not none %}
-<span class="tw-text-text-muted">coords&nbsp;✓</span>
 <script>
 (function () {
+  {% if ra is not none and dec is not none %}
   if (window.lcSetCoords) {
     window.lcSetCoords("lc-canvas-{{ oid }}", {{ ra|tojson_compact|safe }}, {{ dec|tojson_compact|safe }});
   }
+  {% endif %}
+  if (window.lcMaybeHideLoadingStrip) window.lcMaybeHideLoadingStrip("{{ oid }}");
 })();
 </script>
-{% else %}
-<span class="tw-text-text-muted">coords&nbsp;—</span>
-{% endif %}

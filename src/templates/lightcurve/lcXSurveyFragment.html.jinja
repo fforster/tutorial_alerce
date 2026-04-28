@@ -1,0 +1,20 @@
+{#
+  Deferred cross-survey fragment — returned by /htmx/lc_xsurvey.
+
+  When the original survey's RA/Dec finds a counterpart on the other survey
+  (via cone-search), this fragment hands that survey's LC + FP bundle to
+  `window.lcSetCrossSurvey(canvasId, bundle)`, which stashes it on the chart
+  and re-runs `applyModes` so the second telescope's series joins the
+  legend. No visible status — `lcMaybeHideLoadingStrip` collapses the strip
+  once every loader has finished.
+#}
+<script>
+(function () {
+  {% if bundle %}
+  if (window.lcSetCrossSurvey) {
+    window.lcSetCrossSurvey("lc-canvas-{{ oid }}", {{ bundle|tojson_compact|safe }});
+  }
+  {% endif %}
+  if (window.lcMaybeHideLoadingStrip) window.lcMaybeHideLoadingStrip("{{ oid }}");
+})();
+</script>

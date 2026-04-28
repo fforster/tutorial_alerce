@@ -501,6 +501,29 @@ async def lc_info(request: Request, oid: str, survey_id: str) -> HTMLResponse:
     )
 
 
+@router.get("/htmx/lc_xsurvey", response_class=HTMLResponse)
+async def lc_xsurvey(request: Request, oid: str, survey_id: str) -> HTMLResponse:
+    """Deferred cross-survey LC fetch — looks up the same source on the
+    *other* survey via cone-search and hands its detections+FP bundle to
+    `window.lcSetCrossSurvey(canvasId, bundle)` so the chart can overlay
+    LSST + ZTF photometry side-by-side. Returns a script-only fragment
+    that always also calls `lcMaybeHideLoadingStrip` so the placeholder
+    spinner stops whether or not a match was found."""
+    _validate_survey(survey_id)
+    try:
+        bundle = await lightcurve_service.get_lc_xsurvey_bundle(
+            survey=survey_id, oid=oid
+        )
+    except Exception:
+        log.exception("lc_xsurvey failed")
+        bundle = None
+    return templates.TemplateResponse(
+        request,
+        "lightcurve/lcXSurveyFragment.html.jinja",
+        {"oid": oid, "bundle": bundle},
+    )
+
+
 @router.get("/htmx/tns_lookup", response_class=HTMLResponse)
 async def tns_lookup(
     request: Request, oid: str, ra: float | None = None, dec: float | None = None

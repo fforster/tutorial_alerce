@@ -466,3 +466,184 @@ def test_shape_lightcurve_picks_up_merged_e_sci_flux_end_to_end():
     out = shape_lightcurve({"detections": merged_v1}, survey="ztf")
     p = out["bands"][0]["points"][0]
     assert p["e_sci_flux"] is not None and p["e_sci_flux"] > 0
+
+
+# ── Cross-survey bundle (LSST ↔ ZTF photometry overlay) ────────────────────
+
+def test_get_lc_xsurvey_bundle_lsst_to_ztf(monkeypatch):
+    """LSST primary → conesearch ZTF → return ZTF detections shaped as a
+    standard bundle, with the matched ZTF oid stamped on so the client can
+    label the legend group."""
+    import asyncio
+
+    from src.services import lightcurve as lc_mod
+    from src.services import object_info as object_info_mod
+    from src.services import object_list as object_list_mod
+
+    async def fake_object_info(*, survey: str, oid: str):
+        assert (survey, oid) == ("lsst", "313888627082919999")
+        return {"ra": 150.17067, "dec": 1.36823}
+
+    async def fake_get_objects_list(**kwargs):
+        # Conesearch on the *other* survey (ZTF) at the LSST coords.
+        assert kwargs["survey"] == "ztf"
+        assert kwargs["radius"] == lc_mod.XSURVEY_RADIUS_ARCSEC
+        return {"items": [{"oid": "ZTF17aabhbva"}]}
+
+    async def fake_fp_bundle(*, survey: str, oid: str):
+        # Pretend the matched ZTF object has one g detection.
+        assert (survey, oid) == ("ztf", "ZTF17aabhbva")
+        return {
+            "survey": "ztf",
+            "bands": [{"name": "g", "points": [{
+                "mjd": 60000.0, "flux": 1000.0, "e_flux": 50.0,
+                "sci_flux": None, "e_sci_flux": None,
+                "identifier": "1", "has_stamp": False, "isdiffpos": 1,
+            }]}],
+            "forced_phot_bands": [],
+            "n_det": 1, "n_fp": 0, "has_science_flux": True,
+            "multiband_period": None, "parametric_fits": {},
+        }
+
+    monkeypatch.setattr(object_info_mod, "get_object_info", fake_object_info)
+    monkeypatch.setattr(object_list_mod, "get_objects_list", fake_get_objects_list)
+    monkeypatch.setattr(lc_mod, "get_lc_fp_bundle", fake_fp_bundle)
+
+    out = asyncio.run(
+        lc_mod.get_lc_xsurvey_bundle(survey="lsst", oid="313888627082919999")
+    )
+    assert out is not None
+    assert out["survey"] == "ztf"
+    assert out["oid"] == "ZTF17aabhbva"
+    assert out["bands"][0]["name"] == "g"
+
+
+def test_get_lc_xsurvey_bundle_ztf_to_lsst(monkeypatch):
+    """Same in reverse: ZTF primary picks LSST as the cone-search target."""
+    import asyncio
+
+    from src.services import lightcurve as lc_mod
+    from src.services import object_info as object_info_mod
+    from src.services import object_list as object_list_mod
+
+    async def fake_object_info(*, survey: str, oid: str):
+        return {"ra": 150.17067, "dec": 1.36823}
+
+    seen_other = []
+
+    async def fake_get_objects_list(**kwargs):
+        seen_other.append(kwargs["survey"])
+        return {"items": [{"oid": "313888627082919999"}]}
+
+    async def fake_fp_bundle(*, survey: str, oid: str):
+        return {
+            "survey": "lsst",
+            "bands": [{"name": "r", "points": [{
+                "mjd": 60005.0, "flux": 800.0, "e_flux": 40.0,
+                "sci_flux": 7000.0, "e_sci_flux": 50.0,
+                "identifier": "m1", "has_stamp": True, "isdiffpos": None,
+            }]}],
+            "forced_phot_bands": [],
+            "n_det": 1, "n_fp": 0, "has_science_flux": True,
+            "multiband_period": None, "parametric_fits": {},
+        }
+
+    monkeypatch.setattr(object_info_mod, "get_object_info", fake_object_info)
+    monkeypatch.setattr(object_list_mod, "get_objects_list", fake_get_objects_list)
+    monkeypatch.setattr(lc_mod, "get_lc_fp_bundle", fake_fp_bundle)
+
+    out = asyncio.run(
+        lc_mod.get_lc_xsurvey_bundle(survey="ztf", oid="ZTF17aabhbva")
+    )
+    assert seen_other == ["lsst"]
+    assert out["survey"] == "lsst"
+    assert out["oid"] == "313888627082919999"
+
+
+def test_get_lc_xsurvey_bundle_returns_none_when_no_coords(monkeypatch):
+    """object_info without ra/dec ⇒ no conesearch, no bundle."""
+    import asyncio
+
+    from src.services import lightcurve as lc_mod
+    from src.services import object_info as object_info_mod
+    from src.services import object_list as object_list_mod
+
+    list_called = False
+
+    async def fake_object_info(*, survey: str, oid: str):
+        return {"ra": None, "dec": None}
+
+    async def fake_get_objects_list(**kwargs):
+        nonlocal list_called
+        list_called = True
+        return {"items": []}
+
+    monkeypatch.setattr(object_info_mod, "get_object_info", fake_object_info)
+    monkeypatch.setattr(object_list_mod, "get_objects_list", fake_get_objects_list)
+
+    out = asyncio.run(
+        lc_mod.get_lc_xsurvey_bundle(survey="lsst", oid="x")
+    )
+    assert out is None
+    assert not list_called
+
+
+def test_get_lc_xsurvey_bundle_returns_none_when_no_match(monkeypatch):
+    """Empty conesearch result ⇒ None (no bundle, no FP fetch)."""
+    import asyncio
+
+    from src.services import lightcurve as lc_mod
+    from src.services import object_info as object_info_mod
+    from src.services import object_list as object_list_mod
+
+    fp_called = False
+
+    async def fake_object_info(*, survey: str, oid: str):
+        return {"ra": 10.0, "dec": 20.0}
+
+    async def fake_get_objects_list(**kwargs):
+        return {"items": []}
+
+    async def fake_fp_bundle(*, survey: str, oid: str):
+        nonlocal fp_called
+        fp_called = True
+        return {}
+
+    monkeypatch.setattr(object_info_mod, "get_object_info", fake_object_info)
+    monkeypatch.setattr(object_list_mod, "get_objects_list", fake_get_objects_list)
+    monkeypatch.setattr(lc_mod, "get_lc_fp_bundle", fake_fp_bundle)
+
+    out = asyncio.run(
+        lc_mod.get_lc_xsurvey_bundle(survey="lsst", oid="x")
+    )
+    assert out is None
+    assert not fp_called
+
+
+def test_get_lc_xsurvey_bundle_skips_empty_match(monkeypatch):
+    """Match with zero detections + zero FP isn't worth a legend group —
+    return None so the legend stays clean."""
+    import asyncio
+
+    from src.services import lightcurve as lc_mod
+    from src.services import object_info as object_info_mod
+    from src.services import object_list as object_list_mod
+
+    async def fake_object_info(*, survey: str, oid: str):
+        return {"ra": 10.0, "dec": 20.0}
+
+    async def fake_get_objects_list(**kwargs):
+        return {"items": [{"oid": "ZTF99stub"}]}
+
+    async def fake_fp_bundle(*, survey: str, oid: str):
+        return {"survey": "ztf", "bands": [], "forced_phot_bands": [],
+                "n_det": 0, "n_fp": 0}
+
+    monkeypatch.setattr(object_info_mod, "get_object_info", fake_object_info)
+    monkeypatch.setattr(object_list_mod, "get_objects_list", fake_get_objects_list)
+    monkeypatch.setattr(lc_mod, "get_lc_fp_bundle", fake_fp_bundle)
+
+    out = asyncio.run(
+        lc_mod.get_lc_xsurvey_bundle(survey="lsst", oid="x")
+    )
+    assert out is None

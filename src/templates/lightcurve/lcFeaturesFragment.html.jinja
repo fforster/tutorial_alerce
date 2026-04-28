@@ -8,12 +8,14 @@
     doesn't have (SPM/FLEET/TDE).
   Both controls were rendered in lightcurvePreview.html.jinja with
   `tw-hidden` so this fragment only flips visibility — no DOM injection.
+  No visible status is rendered; once every loader finishes,
+  `lcMaybeHideLoadingStrip` collapses the strip.
 #}
-<span class="tw-text-text-muted">features&nbsp;{% if features.multiband_period or features.parametric_fits %}✓{% else %}—{% endif %}</span>
 <script>
 (function () {
   if (window.lcSetFeatures) {
     window.lcSetFeatures("lc-canvas-{{ oid }}", {{ features|tojson_compact|safe }});
   }
+  if (window.lcMaybeHideLoadingStrip) window.lcMaybeHideLoadingStrip("{{ oid }}");
 })();
 </script>

@@ -25,6 +25,12 @@ from .survey_config import SC
 
 log = logging.getLogger(__name__)
 
+# Cone radius (arcsec) for the cross-survey OID match. Both surveys publish
+# astrometry good to ~0.1″ for bright objects; 3″ comfortably absorbs the
+# worst-case mismatch (faint asteroids etc.) without pulling in unrelated
+# neighbors at high galactic latitudes. Same default as the prototype.
+XSURVEY_RADIUS_ARCSEC = 3.0
+
 
 def _bucket_by_band(normalized: list[dict[str, Any]], cfg) -> list[dict[str, Any]]:
     """Group normalized rows by band, drop rows missing mjd/flux, and order
@@ -287,6 +293,90 @@ async def get_lc_fp_bundle(*, survey: str, oid: str) -> dict[str, Any] | None:
         raw["detections"] = _merge_ztf_v2_corr(raw["detections"], fp_resp)
     fp_raw = _extract_fp(fp_resp, survey)
     return shape_lightcurve(raw, survey=survey, fp_raw=fp_raw)
+
+
+async def get_lc_xsurvey_bundle(
+    *, survey: str, oid: str
+) -> dict[str, Any] | None:
+    """Cross-survey LC bundle: find the same source on the *other* survey via
+    cone-search on this object's RA/Dec, then fetch its detections + FP and
+    return a `shape_lightcurve`-style payload (with the matched cross-survey
+    `oid` stamped on so the client can label / link to it).
+
+    Pipeline:
+      1. `object_info` on the original survey → (ra, dec). No coords ⇒ None.
+      2. Cone-search the other survey at that position (XSURVEY_RADIUS_ARCSEC).
+         No hit ⇒ None.
+      3. `get_lc_fp_bundle` on the matched OID — re-uses the existing LC + FP
+         + ZTF v2 mag_corr merge so the cross-survey overlay has the same
+         data quality as if the user had searched that survey directly.
+
+    Tolerant: any exception in the chain logs + returns None — the LC panel
+    must keep working even if the cross-survey lookup fails or times out.
+    """
+    # Imported lazily to avoid a circular dependency: object_info imports
+    # `other_archives`, which doesn't pull lightcurve, but keeping the import
+    # local is cheaper than restructuring just to satisfy module-load order.
+    from . import object_info as object_info_service
+    from . import object_list as object_list_service
+
+    if survey == "lsst":
+        other = "ztf"
+    elif survey == "ztf":
+        other = "lsst"
+    else:
+        return None
+    try:
+        info = await object_info_service.get_object_info(survey=survey, oid=oid)
+    except Exception as e:
+        log.warning("xsurvey: object_info failed (%s/%s): %s", survey, oid, e)
+        return None
+    if not isinstance(info, dict):
+        return None
+    ra = info.get("ra")
+    dec = info.get("dec")
+    if ra is None or dec is None:
+        return None
+    try:
+        listing = await object_list_service.get_objects_list(
+            survey=other,
+            ra=float(ra),
+            dec=float(dec),
+            radius=XSURVEY_RADIUS_ARCSEC,
+            page=1,
+            page_size=1,
+        )
+    except Exception as e:
+        log.warning(
+            "xsurvey: %s conesearch failed (ra=%s, dec=%s): %s",
+            other, ra, dec, e,
+        )
+        return None
+    items = (listing or {}).get("items") or []
+    if not items:
+        return None
+    other_oid = items[0].get("oid")
+    if not other_oid:
+        return None
+    other_oid = str(other_oid)
+    try:
+        bundle = await get_lc_fp_bundle(survey=other, oid=other_oid)
+    except Exception as e:
+        log.warning(
+            "xsurvey: get_lc_fp_bundle failed (%s/%s): %s",
+            other, other_oid, e,
+        )
+        return None
+    if not isinstance(bundle, dict):
+        return None
+    # Suppress empty matches: a hit with zero detections + zero FP isn't worth
+    # adding a legend group for — keeps the LC clean when the conesearch
+    # picks up a stub object on the other survey.
+    if not bundle.get("bands") and not bundle.get("forced_phot_bands"):
+        return None
+    bundle = dict(bundle)
+    bundle["oid"] = other_oid
+    return bundle
 
 
 async def get_lc_features_bundle(

@@ -3,18 +3,17 @@
 
   Replaces the loading-strip span via hx-swap="outerHTML". On success we
   hand the freshly-shaped LC bundle (detections re-merged with v2 mag_corr
-  + FP bands) to `lcSetBundle` so the chart rebuilds in place. On failure
-  we still consume the placeholder so the spinner stops.
+  + FP bands) to `lcSetBundle` so the chart rebuilds in place. We render
+  no visible status — once every loader has finished, `lcMaybeHideLoadingStrip`
+  collapses the strip so the chart reclaims the row's vertical space.
 #}
-{% if bundle %}
-<span class="tw-text-text-muted">FP&nbsp;✓</span>
 <script>
 (function () {
+  {% if bundle %}
   if (window.lcSetBundle) {
     window.lcSetBundle("lc-canvas-{{ oid }}", {{ bundle|tojson_compact|safe }});
   }
+  {% endif %}
+  if (window.lcMaybeHideLoadingStrip) window.lcMaybeHideLoadingStrip("{{ oid }}");
 })();
 </script>
-{% else %}
-<span class="tw-text-text-muted" title="No forced photometry available for this object.">FP&nbsp;—</span>
-{% endif %}
