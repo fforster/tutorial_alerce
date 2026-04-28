@@ -251,7 +251,10 @@
           ? AB_ZP_NJY - 2.5 * Math.log10(fluxLo) - A - mu
           : Infinity;
       }
-      return { x: p.mjd, y: mag, e, yLo, yHi, identifier: p.identifier, has_stamp: p.has_stamp };
+      // `mjd` rides alongside `x` so the tooltip can format a UTC date
+      // even in fold mode (where x becomes phase). foldDataset spreads
+      // every field through, so this just needs to be added once here.
+      return { x: p.mjd, y: mag, e, yLo, yHi, mjd: p.mjd, identifier: p.identifier, has_stamp: p.has_stamp };
     }
     let y = flux;
     let e = eFlux;
@@ -267,7 +270,21 @@
     }
     const yLo = e != null ? y - e : null;
     const yHi = e != null ? y + e : null;
-    return { x: p.mjd, y, e, yLo, yHi, identifier: p.identifier, has_stamp: p.has_stamp };
+    return { x: p.mjd, y, e, yLo, yHi, mjd: p.mjd, identifier: p.identifier, has_stamp: p.has_stamp };
+  }
+
+  // MJD → UTC ISO date for the tooltip. MJD 40587 = 1970-01-01T00:00:00 UTC,
+  // so unix-seconds = (mjd - 40587) * 86400. Truncates to whole-second
+  // precision so the tooltip stays compact ("YYYY-MM-DD HH:MM:SS UTC").
+  // Non-finite / pre-1858 inputs return an empty string.
+  const MJD_UNIX_EPOCH = 40587;
+  function mjdToUtcString(mjd) {
+    if (!isFinite(mjd)) return "";
+    const ms = (mjd - MJD_UNIX_EPOCH) * 86400 * 1000;
+    if (!isFinite(ms)) return "";
+    const d = new Date(ms);
+    const iso = d.toISOString(); // "YYYY-MM-DDTHH:MM:SS.sssZ"
+    return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
   }
 
   // Fold projection: map MJD → phase ∈ [0,1), emit the same point twice at
@@ -1076,9 +1093,17 @@
                 const p = ctx.raw;
                 const err = p.e != null ? ` ± ${p.e.toPrecision(3)}` : "";
                 const unit = chart.$lcMode === "mag" ? "mag" : "nJy";
-                const xLabel = chart.$lcFold === "fold" && chart.$lcPeriod > 0
-                  ? `phase ${p.x.toFixed(3)}`
-                  : `MJD ${p.x.toFixed(3)}`;
+                // Time portion: phase shown only in fold mode; MJD always;
+                // UTC always (derived from the underlying MJD even when
+                // the X axis is folded to phase, so the user can map a
+                // phase back to a calendar epoch).
+                const folded = chart.$lcFold === "fold" && chart.$lcPeriod > 0;
+                const mjd = isFinite(p.mjd) ? p.mjd : p.x;
+                const utc = mjdToUtcString(mjd);
+                const utcSuffix = utc ? ` (${utc})` : "";
+                const xLabel = folded
+                  ? `phase ${p.x.toFixed(3)} · MJD ${mjd.toFixed(3)}${utcSuffix}`
+                  : `MJD ${mjd.toFixed(3)}${utcSuffix}`;
                 // Prefix with survey so two `g` series (one per telescope)
                 // are unambiguous in the tooltip; legend drops the prefix
                 // because it's already grouped under the survey header.

@@ -14,9 +14,31 @@
         <li>Box-zoom: <span class="mono">Shift</span> + drag</li>
         <li>Pan: <span class="mono">Ctrl</span> + drag</li>
         <li>Reset zoom: double-click the chart, or the <em>Reset zoom</em> button</li>
-        <li>Select a detection: click a point (syncs the stamps panel)</li>
-        <li>Inspect a point: hover for value, error, band, MJD</li>
-        <li>Toggle a band on/off: click its entry in the legend</li>
+        <li>Select a detection: click a point (the stamps panel auto-dispatches to that detection's survey)</li>
+        <li>Inspect a point: hover for survey, value, error, band, MJD</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Two telescopes on one chart</div>
+      <p class="tw-mb-2 tw-text-text-secondary">
+        When this object has a counterpart on the other survey (3″ cone-search), both surveys' photometry overlays the same chart so you can compare them in one view. Marker shape encodes the telescope so it stays legible at a glance:
+      </p>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">LSST</strong> — filled circles (detections), open apex-up triangles (FP)</li>
+        <li><strong class="tw-text-text-primary">ZTF</strong> — filled squares (detections), open apex-down triangles (FP)</li>
+        <li>Tooltip prefixes the survey label so two <em>g</em>'s can be told apart</li>
+        <li>The matched cross-survey OID also shows up in the basic-info panel as a clickable link to that object's own detail view</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Det vs FP</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">Det</strong> — alert-stream detections: an event triggered the alert pipeline at that epoch (positive or negative significance against the reference). The native ALeRCE data product, with stamps and a candid.</li>
+        <li><strong class="tw-text-text-primary">FP</strong> — forced photometry: the survey re-extracts a flux at the object's known position whether or not an alert fired, including epochs below the alert threshold. No stamps (FP rows are clicks-no-op); useful for filling in the baseline / pre-discovery flux.</li>
+        <li>ZTF FP carries the v2 <span class="mono">mag_corr</span> merge so Sci-mode error bars are reliable; LSST FP comes from a dedicated forced-photometry endpoint.</li>
+      </ul>
+      <div class="tw-font-semibold tw-mb-1">Legend (grouped by telescope and kind)</div>
+      <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li>Headers like <span class="mono">LSST det:</span>, <span class="mono">LSST FP:</span>, <span class="mono">ZTF det:</span>, <span class="mono">ZTF FP:</span> separate each (telescope, kind) bucket</li>
+        <li>Click a band entry to toggle just that band; click a header to toggle the whole bucket as a unit</li>
+        <li>Disabled bands dim to grey instead of strikethrough; the position-residuals scatter, the periodogram input, and the CSV download all follow what's currently visible here</li>
+        <li>Visibility survives every Flux/Mag, Diff/Sci, App/Abs, Obs/Der, Fold toggle</li>
       </ul>
       <div class="tw-font-semibold tw-mb-1">Axis toggles (top-right)</div>
       <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">

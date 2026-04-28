@@ -92,9 +92,11 @@
         {#
           Each option labels the band with its survey ("LSST g", "ZTF r")
           so the band letter is unambiguous when a cross-survey overlay is
-          loaded — `g` means different things on the two telescopes.
-          Picker entries today come from the primary survey only, but the
-          per-row tagging is forward-compatible with a future cross-survey
+          loaded — `g` means different things on the two telescopes. The
+          UTC date/time rides alongside the MJD so the user can map an
+          epoch to a calendar date without leaving the panel. Picker
+          entries today come from the primary survey only, but the per-
+          row tagging is forward-compatible with a future cross-survey
           picker extension.
         #}
         {% for d in ctx.detections %}
@@ -102,7 +104,7 @@
             value="{{ d.identifier }}"
             {% if ctx.selected and d.identifier == ctx.selected.identifier %}selected{% endif %}
           >
-            MJD {{ "%.3f"|format(d.mjd) }}{% if d.band %} · {{ survey_id|upper }} {{ d.band }}{% endif %}
+            MJD {{ "%.3f"|format(d.mjd) }}{% if d.mjd_utc %} ({{ d.mjd_utc }}){% endif %}{% if d.band %} · {{ survey_id|upper }} {{ d.band }}{% endif %}
           </option>
         {% endfor %}
       </select>

@@ -116,6 +116,26 @@ def test_stamp_url_templates_present_even_when_no_selection():
     assert "__IDENT__" in tmpls["science"]
 
 
+def test_picker_includes_utc_string_per_detection():
+    """The dropdown options need a UTC date next to the MJD; the service
+    pre-formats it so the template stays a one-liner. MJD 60000 sits in
+    Feb 2023 — pin the day to lock the conversion to MJD-40587 + UTC."""
+    raw = {"detections": [_ztf_det(60000.5, 1, 42)]}
+    ctx = shape_stamps_context(raw, survey="ztf", oid="ZTF21abc", identifier=None)
+    row = ctx["detections"][0]
+    assert row["mjd_utc"].startswith("2023-02-25")
+    assert row["mjd_utc"].endswith("UTC")
+
+
+def test_picker_utc_is_blank_for_missing_mjd():
+    """Defensive: a row that somehow lacks mjd shouldn't break — the
+    template renders without the parenthetical UTC suffix."""
+    from src.services.stamps import _mjd_to_utc
+    assert _mjd_to_utc(None) == ""
+    assert _mjd_to_utc(float("nan")) == ""
+    assert _mjd_to_utc("not-a-number") == ""
+
+
 def test_stamp_url_templates_by_survey_carry_oid_and_ident_placeholders():
     """Per-survey templates feed cross-survey clicks (a ZTF point on an
     LSST view, or vice versa). Both __OID__ and __IDENT__ are placeholders

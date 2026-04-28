@@ -10,12 +10,37 @@ Identifier conventions:
 """
 from __future__ import annotations
 
+import datetime
+import math
 from typing import Any
 
 from . import alerce_client
 from .survey_config import SC
 
 STAMP_TYPES: tuple[str, ...] = ("science", "template", "difference")
+
+# MJD 40587 = 1970-01-01T00:00:00 UTC, so unix-seconds = (mjd - 40587) * 86400.
+# Used by the picker so the dropdown shows MJD + UTC side-by-side ("YYYY-MM-DD
+# HH:MM:SS UTC"), letting the user map an epoch to a calendar date without
+# leaving the panel.
+_MJD_UNIX_EPOCH = 40587
+
+
+def _mjd_to_utc(mjd: Any) -> str:
+    if mjd is None:
+        return ""
+    try:
+        m = float(mjd)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(m):
+        return ""
+    seconds = (m - _MJD_UNIX_EPOCH) * 86400.0
+    try:
+        dt = datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return ""
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def _identifier(det: dict[str, Any], survey: str) -> str | None:
@@ -52,7 +77,14 @@ def shape_stamps_context(
         if mjd is None:
             continue
         picker.append(
-            {"identifier": ident, "mjd": mjd, "band": _band_letter(d, survey)}
+            {
+                "identifier": ident,
+                "mjd": mjd,
+                # Pre-formatted UTC string for the dropdown label so the
+                # template doesn't need a Jinja filter or per-row maths.
+                "mjd_utc": _mjd_to_utc(mjd),
+                "band": _band_letter(d, survey),
+            }
         )
     picker.sort(key=lambda p: p["mjd"], reverse=True)  # most recent first
 
