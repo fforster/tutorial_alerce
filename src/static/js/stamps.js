@@ -17,7 +17,11 @@
   // without re-fetching / re-parsing FITS on every click.
   const cache = new WeakMap();
 
-  const ZOOM_MIN = 0.25;
+  // 1× is the natural minimum: the survey-side cutout is already cropped
+  // tightly around the object, so zooming below that pads black bars
+  // without revealing more sky. Cap zoom-out at the baseline (fit-to-
+  // canvas) and let zoom-in run up to 8× for inspecting the PSF core.
+  const ZOOM_MIN = 1;
   const ZOOM_MAX = 8;
 
   function getPanelZoom(panel) {
@@ -376,7 +380,36 @@
     ctx.restore();
   }
 
+  // Wheel-zoom factor per scroll tick. Match the +/- button feel
+  // (1.25× per click) so wheel and buttons drive the same zoom curve;
+  // `redrawPanelStamps` keeps the three stamps in lockstep just like
+  // `zoomStamps` does.
+  const WHEEL_ZOOM_STEP = 1.25;
+
+  function bindWheelZoom(canvas) {
+    if (canvas.$wheelBound) return;
+    canvas.$wheelBound = true;
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        // preventDefault so the page doesn't scroll when the user is
+        // panning the wheel over the stamp; passive: false (below) is
+        // required for that. Tick direction follows convention: scroll
+        // up zooms in, scroll down zooms out.
+        e.preventDefault();
+        if (!e.deltaY) return;
+        const factor = e.deltaY < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
+        if (window.zoomStamps) window.zoomStamps(canvas, factor);
+      },
+      { passive: false },
+    );
+  }
+
   function initCanvas(canvas) {
+    // Wheel zoom is bound on every canvas — including ones whose FITS
+    // bytes already finished loading on a prior swap — so it survives
+    // the htmx:afterSwap re-init pass.
+    bindWheelZoom(canvas);
     if (rendered.has(canvas)) return;
     const url = canvas.dataset.stampUrl;
     if (!url) return;
@@ -447,6 +480,147 @@
     if (picker && useSurvey === panel.dataset.survey) {
       if (picker.value !== String(ident)) picker.value = String(ident);
     }
+  };
+
+  // Download the underlying FITS bytes for the stamp this button sits next
+  // to. Re-fetches `data-stamp-url` rather than reaching into the cached
+  // post-stretch source canvas — the user almost always wants the science
+  // product (FITS, with WCS), not the asinh-stretched preview PNG. The
+  // wire form is sometimes gzip; we sniff the magic bytes and pick the
+  // matching extension so astropy / ds9 / etc. can handle the file
+  // without manual unwrapping.
+  window.downloadStamp = async function (btn) {
+    const card = btn?.closest(".tw-relative");
+    if (!card) return;
+    const canvas = card.querySelector("canvas.stamp-canvas");
+    if (!canvas) return;
+    const url = canvas.dataset.stampUrl;
+    if (!url) return;
+    const stampType = canvas.dataset.stampType || "stamp";
+    const panel = document.getElementById("stamps-panel");
+    // Both `oid` and the identifier come straight from the stamp URL —
+    // `updateStampsForIdentifier` rebuilds it from the per-survey
+    // template whenever the user clicks a different point, so URL params
+    // always describe the survey + object the canvas currently shows.
+    // That way a cross-survey click (ZTF point on an LSST view, or vice
+    // versa) lands the matched survey's OID in the filename, not the
+    // primary view's OID.
+    let oid = "";
+    let ident = "";
+    try {
+      const u = new URL(url, window.location.origin);
+      oid = u.searchParams.get("oid") || "";
+      ident = u.searchParams.get("candid")
+           || u.searchParams.get("measurement_id")
+           || "";
+    } catch (_e) { /* keep oid + ident empty */ }
+    // Fall back to the panel's primary OID only when the URL didn't
+    // surface one (defensive — the stamp endpoints we drive both carry
+    // it). Same fallback for the identifier.
+    if (!oid) oid = (panel && panel.dataset.oid) || "object";
+    if (!ident && window._selectedIdentifier) ident = String(window._selectedIdentifier);
+
+    // Slug helper — strip anything that's awkward in a download filename
+    // (the OID is fine, the candid is digits, but be defensive).
+    const slug = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, "_");
+
+    // Brief in-button feedback so the user sees the click registered even
+    // though the actual download takes a beat. We swap the title attr +
+    // dim the button while the fetch is in flight.
+    const originalTitle = btn.getAttribute("title");
+    btn.setAttribute("title", "Downloading…");
+    btn.classList.add("tw-opacity-60");
+    btn.disabled = true;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      const magic = new Uint8Array(buf, 0, 2);
+      const isGz = magic.length >= 2 && magic[0] === 0x1f && magic[1] === 0x8b;
+      const ext = isGz ? "fits.gz" : "fits";
+      const mime = isGz ? "application/gzip" : "application/fits";
+      const parts = [slug(oid), stampType];
+      if (ident) parts.push(slug(ident));
+      const filename = `${parts.join("_")}.${ext}`;
+      const blob = new Blob([buf], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Same revoke-on-next-tick pattern the LC CSV download uses.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+      btn.setAttribute("title", originalTitle || "Download FITS");
+    } catch (e) {
+      console.error("stamp download failed:", e);
+      btn.setAttribute("title", `Download failed: ${e.message || e}`);
+    } finally {
+      btn.classList.remove("tw-opacity-60");
+      btn.disabled = false;
+    }
+  };
+
+  // Open the AVRO record modal for the currently displayed detection.
+  // Mirrors the "Show features" pattern (basic-info → /htmx/features
+  // populates #features-modal): we issue an htmx GET to /htmx/avro with
+  // oid + candid + survey_id pulled from the current stamp's URL, and the
+  // server fragment fills #avro-modal in place. Survey is sniffed from
+  // the URL host so cross-survey clicks (LSST stamp on a ZTF view, or
+  // vice versa) flow to the right server-side branch — LSST returns a
+  // "ZTF-only" notice rather than 404.
+  function detectSurveyFromStampUrl(url) {
+    if (typeof url !== "string") return "";
+    if (url.indexOf("api-lsst.alerce.online") !== -1) return "lsst";
+    if (url.indexOf("avro.alerce.online") !== -1) return "ztf";
+    return "";
+  }
+
+  window.openAvroModal = function () {
+    const panel = document.getElementById("stamps-panel");
+    if (!panel) return;
+    // Read the current science canvas (or the first stamp canvas as
+    // fallback) — its `data-stamp-url` is rebuilt by
+    // updateStampsForIdentifier on every click, so it always describes
+    // the displayed detection.
+    const canvas = panel.querySelector(
+      'canvas.stamp-canvas[data-stamp-type="science"]',
+    ) || panel.querySelector("canvas.stamp-canvas");
+    if (!canvas) return;
+    const url = canvas.dataset.stampUrl;
+    if (!url) return;
+    let oid = "";
+    let candid = "";
+    let survey = detectSurveyFromStampUrl(url);
+    try {
+      const u = new URL(url, window.location.origin);
+      oid = u.searchParams.get("oid") || "";
+      // Both ZTF (candid) and LSST (measurement_id) live under different
+      // query params; either works as the AVRO endpoint's `candid` arg —
+      // the server short-circuits the LSST branch before hitting
+      // upstream, so passing through whichever is present is safe.
+      candid = u.searchParams.get("candid")
+            || u.searchParams.get("measurement_id")
+            || "";
+    } catch (_e) { /* keep oid + candid empty */ }
+    if (!survey) survey = panel.dataset.survey || "";
+    if (!oid) oid = panel.dataset.oid || "";
+    if (!oid || !candid) {
+      console.warn("openAvroModal: missing oid/candid", { oid, candid, url });
+      return;
+    }
+    if (typeof htmx === "undefined") {
+      console.warn("openAvroModal: htmx not loaded");
+      return;
+    }
+    // Relative URL — same origin as the page, matches every other
+    // server-rendered hx-get in this app.
+    const params = new URLSearchParams({ oid, candid, survey_id: survey });
+    htmx.ajax("GET", `/htmx/avro?${params.toString()}`, {
+      target: "#avro-modal",
+      swap: "innerHTML",
+    });
   };
 
   // Apply a zoom factor (relative multiplier, or the string "reset") to every

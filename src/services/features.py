@@ -186,7 +186,7 @@ def shape_features(raw: Any, *, survey: str) -> dict[str, Any]:
 # Three of the ALeRCE ZTF feature-extractor outputs are *parametric fits* of
 # the light curve, each producing a handful of per-band numbers:
 #
-#   SPM  (Sánchez-Sáez+2021 stochastic-parametric model) —
+#   SPM  (Sánchez-Sáez+2021 Supernova Parametric Model) —
 #        SPM_A, SPM_beta, SPM_t0, SPM_gamma, SPM_tau_rise, SPM_tau_fall (+SPM_chi)
 #   FLEET (mag-space exp+linear model) —
 #        fleet_a, fleet_w, fleet_m0, fleet_t0 (+fleet_chi)

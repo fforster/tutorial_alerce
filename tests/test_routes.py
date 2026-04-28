@@ -1407,6 +1407,19 @@ def test_stamps_renders_picker_and_canvases(client, monkeypatch):
     assert "zoomStamps(this, 1/1.25)" in r.text
     assert "zoomStamps(this, 1.25)" in r.text
     assert "zoomStamps(this, 'reset')" in r.text
+    # Per-stamp download button — one per cutout type, wired to
+    # window.downloadStamp; helper fetches data-stamp-url + saves as FITS.
+    assert r.text.count("stamp-download-btn") == 3
+    assert "downloadStamp(this)" in r.text
+    assert 'aria-label="Download science FITS"' in r.text
+    assert 'aria-label="Download template FITS"' in r.text
+    assert 'aria-label="Download difference FITS"' in r.text
+    # AVRO button — opens the per-detection AVRO record viewer modal
+    # via window.openAvroModal (reads the current canvas's stamp URL
+    # to derive oid + candid + survey, then htmx-ajax /htmx/avro into
+    # #avro-modal).
+    assert "stamps-avro-btn" in r.text
+    assert "openAvroModal()" in r.text
 
 
 def test_stamps_empty_shows_message(client, monkeypatch):
@@ -1450,6 +1463,85 @@ def test_stamps_upstream_error(client, monkeypatch):
     r = client.get("/htmx/stamps?oid=x&survey_id=ztf")
     assert r.status_code == 200
     assert "Upstream error" in r.text
+
+
+def test_avro_endpoint_renders_table_for_ztf(client, monkeypatch):
+    """AVRO modal — populates from the candidate dict, sorts rows by
+    name, surfaces meta in the header."""
+    async def fake_avro(*, oid, candid, survey):
+        assert (survey, oid, candid) == ("ztf", "ZTF17aabhbva", "12345")
+        return {
+            "available": True,
+            "rows": [
+                {"name": "drb", "value": 0.0, "value_display": "0"},
+                {"name": "magpsf", "value": 20.247,
+                 "value_display": "20.247"},
+            ],
+            "object_id": "ZTF17aabhbva",
+            "publisher": "ALeRCE",
+            "schemavsn": "3.3",
+            "n_prv_candidates": 5,
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.avro_service.get_avro_info", fake_avro,
+    )
+    r = client.get("/htmx/avro?oid=ZTF17aabhbva&candid=12345&survey_id=ztf")
+    assert r.status_code == 200
+    # Header carries the OID + candid + meta.
+    assert "AVRO &mdash; ZTF17aabhbva" in r.text or "AVRO — ZTF17aabhbva" in r.text
+    assert "candid 12345" in r.text
+    assert "schema" in r.text and "3.3" in r.text
+    # Rows render in a table with name + value cells.
+    assert 'class="avro-row' in r.text
+    assert "magpsf" in r.text
+    assert "20.247" in r.text
+    # Filter input + close button.
+    assert 'class="avro-filter' in r.text
+    # Modal slot clear-on-close pattern matches features-modal's.
+    assert "document.getElementById('avro-modal').innerHTML = ''" in r.text
+
+
+def test_avro_endpoint_lsst_renders_unavailable_message(client, monkeypatch):
+    """LSST measurement_ids return an `available=False` payload upstream,
+    and the template renders the reason string in place of the table."""
+    async def fake_avro(*, oid, candid, survey):
+        assert survey == "lsst"
+        return {
+            "available": False,
+            "reason": "AVRO records are only published for ZTF; LSST does not expose them.",
+            "rows": [],
+        }
+
+    monkeypatch.setattr(
+        "src.routes.htmx.avro_service.get_avro_info", fake_avro,
+    )
+    r = client.get(
+        "/htmx/avro?oid=313888627082919999&candid=999&survey_id=lsst"
+    )
+    assert r.status_code == 200
+    assert "ZTF" in r.text
+    assert 'class="avro-row' not in r.text  # no table when unavailable
+
+
+def test_avro_endpoint_rejects_unknown_survey(client):
+    r = client.get("/htmx/avro?oid=x&candid=1&survey_id=panstarrs")
+    assert r.status_code == 400
+
+
+def test_detail_includes_avro_modal_slot(client, monkeypatch):
+    """The detail container has to mount #avro-modal alongside
+    #features-modal; the AVRO button targets it via htmx.ajax."""
+    async def fake_info(*, survey, oid):
+        return {"oid": oid, "survey": survey, "ra": 180.0, "dec": -30.0}
+
+    monkeypatch.setattr(
+        "src.routes.htmx.object_info_service.get_object_info",
+        fake_info,
+    )
+    r = client.get("/htmx/detail?oid=ZTF21abc&survey_id=ztf")
+    assert r.status_code == 200
+    assert 'id="avro-modal"' in r.text
 
 
 def test_aladin_renders_host_with_coordinates(client, monkeypatch):

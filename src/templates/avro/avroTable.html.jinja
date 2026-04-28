@@ -1,0 +1,125 @@
+{#
+  AVRO record table modal — rendered by /htmx/avro into #avro-modal.
+  Mirrors the features-modal pattern (backdrop + close button +
+  filter input). Dismissal: ✕ button, backdrop click, or Escape — all
+  clear #avro-modal's innerHTML.
+
+  ctx shape: {
+    available: bool,
+    reason: str,                  # populated when available is False
+    rows: [{name, value, value_display}],
+    object_id: str | None,
+    publisher: str | None,
+    schemavsn: str | None,
+    n_prv_candidates: int | None,
+  }
+#}
+<div
+  id="avro-modal-inner"
+  class="tw-fixed tw-inset-0 tw-z-40 tw-flex tw-items-center tw-justify-center tw-bg-black/70"
+  onclick="if (event.target === this) document.getElementById('avro-modal').innerHTML = ''"
+>
+  <div
+    class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-shadow-xl tw-w-full tw-max-w-3xl tw-max-h-[80vh] tw-flex tw-flex-col tw-m-4"
+  >
+    <div class="tw-flex tw-items-center tw-justify-between tw-p-3 tw-border-b tw-border-border tw-gap-3">
+      <div class="tw-min-w-0">
+        <div class="tw-text-sm tw-font-semibold tw-truncate">
+          AVRO — {{ oid }}
+          <span class="tw-text-text-muted tw-font-normal">·</span>
+          <span class="mono tw-text-text-secondary">candid {{ candid }}</span>
+        </div>
+        <div class="tw-text-xs tw-text-text-muted tw-mt-0.5">
+          {% if ctx.available %}
+            <span class="avro-visible-count">{{ ctx.rows|length }}</span> fields
+            {% if ctx.schemavsn %}· schema <span class="mono">{{ ctx.schemavsn }}</span>{% endif %}
+            {% if ctx.publisher %}· publisher <span class="mono">{{ ctx.publisher }}</span>{% endif %}
+            {% if ctx.n_prv_candidates is not none and ctx.n_prv_candidates > 0 %}· {{ ctx.n_prv_candidates }} prv_candidates (not shown){% endif %}
+          {% else %}
+            {{ ctx.reason or "AVRO record unavailable." }}
+          {% endif %}
+        </div>
+      </div>
+      <button
+        type="button"
+        class="tw-text-sm tw-text-text-muted hover:tw-text-text-primary tw-px-2 tw-py-1 tw-flex-none"
+        onclick="document.getElementById('avro-modal').innerHTML = ''"
+        title="Close (Esc)"
+        aria-label="Close"
+      >✕</button>
+    </div>
+
+    {% if ctx.available and ctx.rows %}
+      {#
+        Filter input — narrows the visible rows to those whose name OR
+        rendered value contains the typed text (case-insensitive). Pure
+        client-side: every row is server-rendered with a
+        `data-filter-text` attr and we toggle `tw-hidden` on rows that
+        don't match. Useful since AVRO records carry ~80 fields and the
+        user usually wants a specific one (e.g. all `mag*` or all `*ref`).
+      #}
+      <div class="tw-p-3 tw-border-b tw-border-border">
+        <input
+          type="search"
+          placeholder="Filter… (name or value)"
+          class="avro-filter tw-w-full tw-px-2 tw-py-1 tw-text-xs tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary"
+          oninput="(function (q) {
+            q = (q || '').trim().toLowerCase();
+            const rows = document.querySelectorAll('#avro-modal-inner tr.avro-row');
+            let n = 0;
+            rows.forEach((tr) => {
+              const text = tr.dataset.filterText || '';
+              const show = !q || text.indexOf(q) !== -1;
+              tr.classList.toggle('tw-hidden', !show);
+              if (show) n++;
+            });
+            const lbl = document.querySelector('#avro-modal-inner .avro-visible-count');
+            if (lbl) lbl.textContent = n;
+          })(this.value)"
+          autofocus
+        />
+      </div>
+      <div class="tw-overflow-auto tw-flex-1">
+        <table class="tw-w-full tw-text-xs tw-font-mono">
+          <thead class="tw-sticky tw-top-0 tw-bg-bg-card tw-z-10">
+            <tr class="tw-text-left tw-text-text-muted">
+              <th class="tw-px-3 tw-py-2 tw-border-b tw-border-border tw-font-medium">name</th>
+              <th class="tw-px-3 tw-py-2 tw-border-b tw-border-border tw-font-medium">value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in ctx.rows %}
+              <tr
+                class="avro-row tw-border-b tw-border-border/60 hover:tw-bg-bg-tertiary"
+                data-filter-text="{{ (row.name + ' ' + row.value_display)|lower }}"
+              >
+                <td class="tw-px-3 tw-py-1 tw-text-text-secondary tw-whitespace-nowrap">{{ row.name }}</td>
+                <td class="tw-px-3 tw-py-1 tw-text-text-primary tw-break-all">{{ row.value_display }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="tw-p-6 tw-text-xs tw-text-text-muted tw-text-center">
+        {{ ctx.reason or "No AVRO data to display." }}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{# Escape-to-close — bind once per modal mount; the inline script tears
+   itself down via the same innerHTML clear that the close button uses. #}
+<script>
+(function () {
+  const modal = document.getElementById("avro-modal-inner");
+  if (!modal) return;
+  function onKey(e) {
+    if (e.key !== "Escape") return;
+    const slot = document.getElementById("avro-modal");
+    if (slot) slot.innerHTML = "";
+    document.removeEventListener("keydown", onKey);
+  }
+  document.addEventListener("keydown", onKey);
+})();
+</script>

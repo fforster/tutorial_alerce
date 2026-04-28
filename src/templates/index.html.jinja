@@ -19,10 +19,20 @@
       title="Back to home (clears all filters)"
       aria-label="ALeRCE Explorer — back to home"
     >
+      {#
+        Logo is 44×44 (≈30% bigger than the previous 34×34) but still fits
+        inside the fixed `tw-h-12` (48 px) header — leaves ~2 px of breathing
+        room top + bottom and doesn't grow the bar. Width/height are inline
+        so the size doesn't depend on whether Tailwind's JIT happened to
+        catch this arbitrary `[44px]` class on the last `npm run build:css`
+        — without the inline rule the SVG would render at its intrinsic
+        (very large) size.
+      #}
       <img
         src="/static/img/alerce-logo.svg"
         alt=""
-        class="tw-h-[34px] tw-w-[34px] tw-flex-none"
+        class="tw-flex-none"
+        style="height: 44px; width: 44px;"
       />
       <span>ALeRCE <span class="tw-text-text-secondary tw-font-normal tw-text-xs">multisurvey explorer</span></span>
     </a>

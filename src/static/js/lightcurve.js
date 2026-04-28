@@ -902,7 +902,28 @@
             title: { display: true, text: "Flux (nJy, diff)", color: "#8b949e" },
             grid: { drawOnChartArea: false, drawTicks: true, tickColor: "#8b949e" },
             border: { display: true, color: "#8b949e" },
-            ticks: { color: "#8b949e" },
+            ticks: {
+              color: "#8b949e",
+              // Default Chart.js tick formatter rounds the mantissa to a
+              // single significant figure for very large / small values
+              // (e.g. "1e20" for an absolute flux of 1.18e20 nJy), which
+              // makes neighboring ticks indistinguishable. Force scientific
+              // notation with one decimal in the mantissa whenever |v|
+              // crosses the engineering-notation threshold; mid-range
+              // values keep the default locale formatter (compact in mag
+              // mode and ordinary flux mode).
+              callback(value) {
+                if (typeof value !== "number" || !isFinite(value)) return value;
+                const abs = Math.abs(value);
+                if (abs !== 0 && (abs >= 1e5 || abs < 1e-3)) {
+                  // toExponential(1) → "1.2e+20"; strip the redundant "+"
+                  // sign on positive exponents to match the user's
+                  // expected "1.1e20" form.
+                  return value.toExponential(1).replace("e+", "e");
+                }
+                return value;
+              },
+            },
             // Chart.js auto-fits the y-axis to point `y` values only, which
             // can clip error bars whose lo/hi extends past the brightest /
             // faintest detection. Walk every visible point's projected
@@ -910,8 +931,18 @@
             // inside the plot area. Non-finite caps (open ends in mag mode)
             // are skipped — the errorBarPlugin already paints them as
             // arrows that reach the edge.
+            //
+            // When the user has defined an arbitrary zoom window (wheel,
+            // shift-drag box-zoom, ctrl-drag pan), respect those limits
+            // verbatim — extending past them would silently undo the
+            // zoom. The errorBarPlugin clips to chartArea so bars that
+            // extend outside the zoom window just get cropped, which is
+            // the expected behavior.
             afterDataLimits(scale) {
               const ch = scale.chart;
+              if (typeof ch.isZoomedOrPanned === "function" && ch.isZoomedOrPanned()) {
+                return;
+              }
               let lo = scale.min;
               let hi = scale.max;
               ch.data.datasets.forEach((ds, di) => {
@@ -1412,32 +1443,49 @@
     btn.disabled = true;
   }
 
+  // Read live ra/dec off the button — the deferred /htmx/lc_info fragment
+  // stamps these *after* bindDrButton has already run, so capturing them
+  // in the closure at bind time would freeze them as NaN and the handler
+  // would silently no-op forever. Returns NaN/NaN if still not stamped.
+  function drCoordsFromBtn(btn) {
+    return [parseFloat(btn.dataset.ra), parseFloat(btn.dataset.dec)];
+  }
+
+  // Pre-fetch helper, exposed so lcSetCoords can kick the request off the
+  // moment ra/dec land — keeps the "instant on click" UX even when the
+  // bind-time fetch had to bail because coords weren't known yet.
+  function tryPrefetchDr(canvasId) {
+    const btn = document.querySelector(`.lc-dr-toggle[data-target="${canvasId}"]`);
+    if (!btn) return;
+    const canvas = document.getElementById(canvasId);
+    const chart = canvas && charts.get(canvas);
+    if (!chart || chart.$lcDrLoaded) return;
+    const [ra, dec] = drCoordsFromBtn(btn);
+    if (!isFinite(ra) || !isFinite(dec)) return;
+    ensureDrLoaded(chart, ra, dec).then((ok) => {
+      if (!ok) return;
+      if (!chart.$lcDrBands.length) { markDrEmpty(btn); return; }
+      if (chart.$lcDrRestoreShow) {
+        chart.$lcDrRestoreShow = false;
+        chart.$lcDrShown = true;
+        setDrButtonState(btn, chart);
+        applyModes(chart);
+        cacheAndPushLcState(chart);
+      }
+    });
+  }
+
   function bindDrButton(btn) {
     if (btn.$bound) return;
     btn.$bound = true;
     const canvas = document.getElementById(btn.dataset.target);
     const chart = canvas && charts.get(canvas);
-    const ra = parseFloat(btn.dataset.ra);
-    const dec = parseFloat(btn.dataset.dec);
 
-    // Background pre-fetch at bind time so clicking is instant on good
-    // connections, and so an empty cone is visible in the button label
-    // without requiring a click. Silent by design — no "…" flash.
-    // If restored state wanted DR visible (user had it on for the previous
-    // object), flip the toggle automatically once the fetch lands.
-    if (chart) {
-      ensureDrLoaded(chart, ra, dec).then((ok) => {
-        if (!ok) return;
-        if (!chart.$lcDrBands.length) { markDrEmpty(btn); return; }
-        if (chart.$lcDrRestoreShow) {
-          chart.$lcDrRestoreShow = false;
-          chart.$lcDrShown = true;
-          setDrButtonState(btn, chart);
-          applyModes(chart);
-          cacheAndPushLcState(chart);
-        }
-      });
-    }
+    // Background pre-fetch at bind time when coords are already known
+    // (no deferred /htmx/lc_info gate). When they aren't, lcSetCoords
+    // calls tryPrefetchDr the moment they arrive, so we get the same
+    // "instant on click" UX without re-binding.
+    tryPrefetchDr(btn.dataset.target);
 
     btn.addEventListener("click", async () => {
       if (!chart) return;
@@ -1451,9 +1499,13 @@
         cacheAndPushLcState(chart);
         return;
       }
-      // Slow path: user beat the pre-fetch. Show a transient "…" indicator
-      // while we wait on the shared promise, then fall through to the same
-      // toggle logic.
+      // Slow path: user beat the pre-fetch. Read coords from the button's
+      // live data attrs (lcSetCoords stamps them after the bind has run,
+      // so anything captured in the bind-time closure would still be
+      // NaN — the original ZTF18aaylgug regression). Show a transient
+      // "…" indicator while we wait on the shared promise, then fall
+      // through to the same toggle logic.
+      const [ra, dec] = drCoordsFromBtn(btn);
       const originalText = btn.textContent;
       btn.disabled = true;
       btn.textContent = "…";
@@ -1887,6 +1939,11 @@
         drBtn.dataset.dec = String(dec);
       }
     }
+    // Coords just arrived — bindDrButton already ran when the LC was
+    // first painted (data-ra/data-dec were still empty then), so the
+    // pre-fetch hasn't fired yet. Kick it now so a subsequent click is
+    // instant + the (0)-cone label fills in without a click.
+    tryPrefetchDr(canvasId);
     // Kick the dust-proxy fetch (same logic as initCanvas — we only fill
     // when the input is still empty, so a manually-typed override or a
     // pre-existing fetch can't be clobbered).

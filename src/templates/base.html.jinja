@@ -6,6 +6,13 @@
 <meta name="htmx-config" content='{"selfRequestsOnly": false}'/>
 <title>{% block title %}ALeRCE Explorer (tutorial){% endblock %}</title>
 
+{# Browser-tab favicon — same SVG used as the in-app header logo so the
+   tab is recognisable at a glance. SVG scales cleanly to whatever icon
+   size the browser asks for; the `image/svg+xml` type hint lets older
+   browsers fall back gracefully if they don't support SVG favicons. #}
+<link rel="icon" type="image/svg+xml" href="/static/img/alerce-logo.svg"/>
+<link rel="apple-touch-icon" href="/static/img/alerce-logo.svg"/>
+
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>

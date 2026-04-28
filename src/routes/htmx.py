@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from ..services import avro as avro_service
 from ..services import classifiers as classifiers_service
 from ..services import coord_residuals as coord_residuals_service
 from ..services import crossmatch as crossmatch_service
@@ -631,6 +632,35 @@ async def stamps(
         request,
         "stamps/stampsPreview.html.jinja",
         {"ctx": ctx, "oid": oid, "survey_id": survey_id},
+    )
+
+
+@router.get("/htmx/avro", response_class=HTMLResponse)
+async def avro(
+    request: Request,
+    oid: str,
+    candid: str,
+    survey_id: str,
+) -> HTMLResponse:
+    """AVRO record metadata viewer — renders the per-detection candidate
+    fields as a table inside a modal overlay (same `#avro-modal` slot
+    pattern as `#features-modal`). LSST measurement_ids land an
+    "AVRO is ZTF-only" message instead of a table, so the button can
+    stay visible regardless of the click survey."""
+    _validate_survey(survey_id)
+    try:
+        ctx = await avro_service.get_avro_info(
+            oid=oid, candid=candid, survey=survey_id
+        )
+    except Exception as e:
+        log.exception("avro failed")
+        return HTMLResponse(
+            f'<div class="tw-text-xs tw-text-red-400 tw-p-4">Upstream error: {e}</div>'
+        )
+    return templates.TemplateResponse(
+        request,
+        "avro/avroTable.html.jinja",
+        {"ctx": ctx, "oid": oid, "candid": candid, "survey_id": survey_id},
     )
 
 

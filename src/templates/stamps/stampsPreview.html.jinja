@@ -55,8 +55,10 @@
       </ul>
       <div class="tw-font-semibold tw-mb-1">Controls</div>
       <ul class="tw-space-y-0.5 tw-list-disc tw-list-inside tw-text-text-secondary">
-        <li>Dropdown: switch to a different epoch — MJD + band listed</li>
-        <li><span class="mono">−</span> / <span class="mono">+</span> / reset: zoom all three stamps in sync, centred on the object</li>
+        <li>Dropdown: switch to a different epoch — MJD + UTC + band listed</li>
+        <li>Mouse wheel over any stamp: zoom all three in/out (centred on the object)</li>
+        <li><span class="mono">−</span> / <span class="mono">+</span> / reset: same zoom, button form (1.25× per click)</li>
+        <li>Top-left ↓ button on each stamp downloads its FITS file (gzip extension preserved when the wire form was gzipped)</li>
         <li>Clicking a point in the light curve or position residuals panel jumps to that epoch here</li>
       </ul>
     {% endcall %}
@@ -84,6 +86,23 @@
           onclick="window.zoomStamps && window.zoomStamps(this, 1.25)"
         >+</button>
       </div>
+      {#
+        AVRO viewer button — opens a modal with the per-detection
+        candidate fields (magpsf, distnr, magnr, drb, …). Sits next to
+        the picker so it's visually close to "I'm choosing this epoch ⇒
+        what does its AVRO record say". Always visible regardless of the
+        click survey; the LSST path lands an "AVRO is ZTF-only"
+        message inside the modal rather than disappearing the button.
+        Click target reads the current canvas's stamp URL (oid + candid
+        always reflect the *displayed* stamp, even after a cross-survey
+        click) — see `window.openAvroModal` in stamps.js.
+      #}
+      <button
+        type="button"
+        class="stamps-avro-btn tw-px-2 tw-py-1 tw-text-xs tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
+        onclick="window.openAvroModal && window.openAvroModal()"
+        title="Show the AVRO record for the currently selected detection (per-alert metadata: astrometry, instrumental fluxes, real-bogus scores, …). ZTF-only."
+      >AVRO</button>
       <select
         class="tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-px-2 tw-py-1 tw-text-xs tw-text-text-primary"
         name="identifier"
@@ -125,6 +144,28 @@
             <div class="stamp-loading tw-absolute tw-inset-0 tw-flex tw-items-center tw-justify-center tw-text-xs tw-text-text-muted">
               loading…
             </div>
+            {#
+              Download the underlying FITS bytes (gzipped if the wire form
+              was) — see `window.downloadStamp` in stamps.js. Sits at the
+              top-left so it doesn't collide with the compass overlay
+              (top-right). The dark semi-transparent background is
+              applied inline so it renders regardless of whether the
+              `tw-bg-black/X` opacity syntax was in the compiled
+              Tailwind output. Fixed 20×20 px square keeps the click
+              target chunky enough on dense stamps.
+            #}
+            <button
+              type="button"
+              class="stamp-download-btn tw-absolute tw-top-1 tw-left-1 tw-flex tw-items-center tw-justify-center tw-rounded tw-text-white tw-leading-none"
+              style="width: 20px; height: 20px; background: rgba(0, 0, 0, 0.6); border: 1px solid rgba(255, 255, 255, 0.25);"
+              onmouseover="this.style.background='rgba(0,0,0,0.85)'"
+              onmouseout="this.style.background='rgba(0,0,0,0.6)'"
+              title="Download {{ t }} FITS"
+              aria-label="Download {{ t }} FITS"
+              onclick="window.downloadStamp && window.downloadStamp(this)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m6 11 6 6 6-6"/><path d="M5 21h14"/></svg>
+            </button>
             <div class="stamp-compass tw-absolute tw-top-1 tw-right-1 tw-text-xs tw-text-text-secondary tw-font-mono"></div>
           </div>
           <div class="tw-text-xs tw-text-text-muted tw-capitalize">{{ t }}</div>
