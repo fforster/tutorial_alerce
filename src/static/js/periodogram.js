@@ -38,52 +38,109 @@
   const ABZP_NJY = 31.4;
   const LN10_OVER_2P5 = Math.log(10) / 2.5;
 
-  // Pull (MJD, value, error) tuples from the LC chart, *grouped by band*.
-  // Each band's inverse-variance-weighted mean is subtracted in place so
-  // the residuals are already centered. Returning per-band arrays (rather
-  // than one stacked array) lets the GLS fit a separate sinusoid per band
-  // at each frequency — see the multi-band fit in `compute`.
+  // Resolve a (survey, bandName) pair to its Chart.js detection dataset and
+  // ask the chart whether it's still visible. Visibility is the user's hook
+  // for excluding a band/survey from the periodogram: hiding an LC legend
+  // entry hides it from us too. Unknown pairs (no matching dataset) are
+  // treated as visible — better to include data than to silently drop it.
+  function isBandVisible(lcChart, survey, bandName) {
+    const datasets = lcChart && lcChart.data && lcChart.data.datasets;
+    if (!datasets) return true;
+    for (let i = 0; i < datasets.length; i++) {
+      const ds = datasets[i];
+      if (ds.$kind === "det" && ds.$survey === survey && ds.label === bandName) {
+        return lcChart.isDatasetVisible(i);
+      }
+    }
+    return true;
+  }
+
+  function surveyLabel(s) {
+    return s === "lsst" ? "LSST" : (s === "ztf" ? "ZTF" : (s || ""));
+  }
+
+  // Pull (MJD, value, error) tuples from the LC chart, *grouped by band*
+  // and *filtered to the bands currently visible in the LC legend* — that
+  // visibility is the user's lever for including/excluding a survey or a
+  // band from the multi-harmonic fit. Cross-survey detections (the matched
+  // counterpart from $lcXRaw) feed into the same pool, so a click on the
+  // LC legend's "LSST:" or "ZTF:" header instantly drops or adds half the
+  // input. Each band's inverse-variance-weighted mean is subtracted in
+  // place so the residuals are centered; per-band arrays let the GLS fit a
+  // separate sinusoid per band at each frequency (see `compute`).
   function getDetDataByBand(lcChart, mode) {
+    const sources = [];
+    const primarySurvey = lcChart.$lcSurvey || "";
+    if (lcChart.$lcRaw && Array.isArray(lcChart.$lcRaw.bands)) {
+      sources.push({ survey: primarySurvey, bands: lcChart.$lcRaw.bands });
+    }
+    if (lcChart.$lcXRaw && Array.isArray(lcChart.$lcXRaw.bands) && lcChart.$lcXRaw.survey) {
+      sources.push({ survey: lcChart.$lcXRaw.survey, bands: lcChart.$lcXRaw.bands });
+    }
     const bands = [];
-    for (const band of (lcChart.$lcRaw?.bands || [])) {
-      const mjd = [], val = [], err = [];
-      for (const p of (band.points || [])) {
-        if (!isFinite(p.mjd)) continue;
-        let value, error;
-        if (mode === "sci_flux") {
-          value = p.sci_flux; error = p.e_sci_flux;
-        } else if (mode === "sci_mag") {
-          // Convert sci_flux to AB mag; small-error linearization for σ_mag
-          // matches the LC panel's mag-error convention.
-          if (p.sci_flux == null || !(p.sci_flux > 0)) continue;
-          if (p.e_sci_flux == null || !(p.e_sci_flux > 0)) continue;
-          value = ABZP_NJY - 2.5 * Math.log10(p.sci_flux);
-          error = p.e_sci_flux / p.sci_flux / LN10_OVER_2P5;
-        } else {
-          // diff_flux (default)
-          value = p.flux; error = p.e_flux;
+    for (const src of sources) {
+      for (const band of src.bands) {
+        if (!isBandVisible(lcChart, src.survey, band.name)) continue;
+        const mjd = [], val = [], err = [];
+        for (const p of (band.points || [])) {
+          if (!isFinite(p.mjd)) continue;
+          let value, error;
+          if (mode === "sci_flux") {
+            value = p.sci_flux; error = p.e_sci_flux;
+          } else if (mode === "sci_mag") {
+            // Convert sci_flux to AB mag; small-error linearization for σ_mag
+            // matches the LC panel's mag-error convention.
+            if (p.sci_flux == null || !(p.sci_flux > 0)) continue;
+            if (p.e_sci_flux == null || !(p.e_sci_flux > 0)) continue;
+            value = ABZP_NJY - 2.5 * Math.log10(p.sci_flux);
+            error = p.e_sci_flux / p.sci_flux / LN10_OVER_2P5;
+          } else {
+            // diff_flux (default)
+            value = p.flux; error = p.e_flux;
+          }
+          if (value == null || error == null || !(error > 0)) continue;
+          mjd.push(p.mjd); val.push(value); err.push(error);
         }
-        if (value == null || error == null || !(error > 0)) continue;
-        mjd.push(p.mjd); val.push(value); err.push(error);
+        if (mjd.length === 0) continue;
+        // Inverse-variance weighted mean for this band.
+        let wSum = 0, wvSum = 0;
+        for (let i = 0; i < val.length; i++) {
+          const w = 1 / (err[i] * err[i]);
+          wSum += w; wvSum += w * val[i];
+        }
+        const bandMean = wSum > 0 ? wvSum / wSum : 0;
+        const resid = new Float64Array(val.length);
+        for (let i = 0; i < val.length; i++) resid[i] = val[i] - bandMean;
+        bands.push({
+          mjd: Float64Array.from(mjd),
+          resid,
+          err: Float64Array.from(err),
+          name: band.name || "",
+          survey: src.survey,
+          label: `${surveyLabel(src.survey)} ${band.name || ""}`.trim(),
+        });
       }
-      if (mjd.length === 0) continue;
-      // Inverse-variance weighted mean for this band.
-      let wSum = 0, wvSum = 0;
-      for (let i = 0; i < val.length; i++) {
-        const w = 1 / (err[i] * err[i]);
-        wSum += w; wvSum += w * val[i];
-      }
-      const bandMean = wSum > 0 ? wvSum / wSum : 0;
-      const resid = new Float64Array(val.length);
-      for (let i = 0; i < val.length; i++) resid[i] = val[i] - bandMean;
-      bands.push({
-        mjd: Float64Array.from(mjd),
-        resid,
-        err: Float64Array.from(err),
-        label: band.label || "",
-      });
     }
     return bands;
+  }
+
+  // "LSST: g r · ZTF: g" — used in the status line so the user can see at a
+  // glance which bands the just-finished compute actually consumed.
+  function describeBands(bandData) {
+    if (!bandData.length) return "";
+    const order = new Map();
+    for (const b of bandData) {
+      if (!order.has(b.survey)) order.set(b.survey, []);
+      order.get(b.survey).push(b.name);
+    }
+    const surveyOrder = ["lsst", "ztf", ...Array.from(order.keys()).filter((s) => s !== "lsst" && s !== "ztf")];
+    const parts = [];
+    for (const s of surveyOrder) {
+      const names = order.get(s);
+      if (!names || !names.length) continue;
+      parts.push(`${surveyLabel(s) || "?"}: ${names.join(" ")}`);
+    }
+    return parts.join(" · ");
   }
 
   function setStatus(panel, msg, kind) {
@@ -351,9 +408,21 @@
     const mode = FLUX_MODES.includes(panel.dataset.fluxType)
       ? panel.dataset.fluxType : "sci_mag";
     const bandData = getDetDataByBand(lcChart, mode);
+    if (bandData.length === 0) {
+      setStatus(
+        panel,
+        `No bands selected — toggle bands on in the Light curve legend.`,
+        "error",
+      );
+      return;
+    }
     const nPts = bandData.reduce((s, b) => s + b.mjd.length, 0);
     if (nPts < 5) {
-      setStatus(panel, `Need ≥5 ${FLUX_LABELS[mode]} points (have ${nPts}).`, "error");
+      setStatus(
+        panel,
+        `Need ≥5 ${FLUX_LABELS[mode]} points across visible bands (have ${nPts}; bands: ${describeBands(bandData)}).`,
+        "error",
+      );
       return;
     }
     const minP = parseFloat(panel.querySelector("[data-pg-min]").value) || 0.1;
@@ -396,9 +465,10 @@
 
     panel.dataset.pgRunning = "1";
     const nBands = bandData.length;
+    const bandDesc = describeBands(bandData);
     setStatus(
       panel,
-      `Computing ${nFreq.toLocaleString()} freqs · ${nBands} band${nBands === 1 ? "" : "s"}…`,
+      `Computing ${nFreq.toLocaleString()} freqs · ${bandDesc}…`,
       "busy",
     );
 
@@ -554,7 +624,7 @@
 
     setStatus(
       panel,
-      `Done · ${nFreq.toLocaleString()} freqs · ${nPts} pts in ${nBands} band${nBands === 1 ? "" : "s"} (${FLUX_LABELS[mode]})`,
+      `Done · ${nFreq.toLocaleString()} freqs · ${nPts} pts (${FLUX_LABELS[mode]}) · ${bandDesc}`,
       null,
     );
     panel.dataset.pgRunning = "0";

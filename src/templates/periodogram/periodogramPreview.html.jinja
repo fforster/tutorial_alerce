@@ -19,6 +19,7 @@
     {% call panel_help("Periodogram", side="right") %}
       <div class="tw-font-semibold tw-mb-1">Computing</div>
       <ul class="tw-space-y-0.5 tw-mb-3 tw-list-disc tw-list-inside tw-text-text-secondary">
+        <li><strong class="tw-text-text-primary">Inputs come from the Light curve panel</strong> — only the surveys/bands currently <em>visible</em> in the LC legend feed the multi-harmonic fit. Toggle a band entry (or a survey header like <span class="mono">LSST:</span> / <span class="mono">ZTF:</span>) to include or exclude it, then hit Compute. The status line lists the bands actually consumed.</li>
         <li><strong class="tw-text-text-primary">Min P / Max P</strong> — period bounds in days. The frequency grid is set to <span class="mono">df = 1/(oversample · T)</span> (Rayleigh-spaced).</li>
         <li><strong class="tw-text-text-primary">Over</strong> — oversampling factor (5 fast, 10 thorough); higher catches narrow peaks at proportionally higher compute cost.</li>
         <li><strong class="tw-text-text-primary">Diff flux / Sci flux / Sci mag</strong> — input domain. <em>Sci mag</em> (AB, ZP 31.4) is usually best for variable stars; <em>Diff flux</em> for transients.</li>
@@ -69,7 +70,7 @@
       type="button"
       data-pg-compute
       class="tw-px-2 tw-py-0.5 tw-bg-accent tw-text-bg-primary tw-rounded tw-font-medium hover:tw-bg-accent-hover"
-      title="Run the multi-band GLS over [Min P, Max P]. The best peak is auto-selected and the main light curve is folded at that period."
+      title="Run the multi-band GLS over [Min P, Max P], using only the surveys/bands currently visible in the Light curve panel (toggle entries in the LC legend to change the input set). The best peak is auto-selected and the main light curve is folded at that period."
     >Compute</button>
     <button
       type="button"
@@ -80,6 +81,13 @@
     <span data-pg-status class="tw-text-text-muted tw-font-mono tw-text-[10px] tw-truncate"
       title="Compute progress and final summary (number of frequencies, points, bands, input mode)."></span>
   </div>
+
+  {# Permanent reminder of the input-set rule. Kept terse so it doesn't
+     crowd the toolbar — the tooltip and the in-panel help spell it out. #}
+  <div
+    class="tw-text-[10px] tw-text-text-muted tw-italic tw-mb-1.5 tw-px-0.5"
+    title="The periodogram only uses surveys/bands that are currently visible in the Light curve legend. Click a band entry — or a survey header (LSST: / ZTF:) — to add or drop it from the input set, then re-run Compute."
+  >Uses only the surveys/bands visible in the Light curve legend.</div>
 
   {# Periodogram canvas — flex-1 so it grows to fill the slot height. #}
   <div class="tw-relative tw-flex-1 tw-min-h-[10rem]"
