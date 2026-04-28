@@ -114,3 +114,24 @@ def test_stamp_url_templates_present_even_when_no_selection():
     tmpls = ctx["stamp_url_templates"]
     assert set(tmpls) == {"science", "template", "difference"}
     assert "__IDENT__" in tmpls["science"]
+
+
+def test_stamp_url_templates_by_survey_carry_oid_and_ident_placeholders():
+    """Per-survey templates feed cross-survey clicks (a ZTF point on an
+    LSST view, or vice versa). Both __OID__ and __IDENT__ are placeholders
+    here because the matched cross-survey OID isn't known at server-render
+    time — the client substitutes both at click time using the LC chart's
+    `$lcXOid` for the matched survey."""
+    ctx = shape_stamps_context(
+        {"detections": []}, survey="lsst", oid="LSST-1", identifier=None
+    )
+    by_survey = ctx["stamp_url_templates_by_survey"]
+    assert set(by_survey) == {"lsst", "ztf"}
+    for survey_key, tmpls in by_survey.items():
+        assert set(tmpls) == {"science", "template", "difference"}
+        for url in tmpls.values():
+            assert "__OID__" in url
+            assert "__IDENT__" in url
+    # Sanity: each survey's URL points at the right host.
+    assert "api-lsst.alerce.online" in by_survey["lsst"]["science"]
+    assert "avro.alerce.online" in by_survey["ztf"]["science"]

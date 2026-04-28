@@ -75,11 +75,18 @@
     });
   }
 
-  window.setSelectedIdentifier = function (ident) {
+  // Optional `survey` and `oid` arguments dispatch the stamps swap to the
+  // matching survey's URL template — required for cross-survey clicks
+  // (e.g. a ZTF point on an LSST primary view), where the identifier
+  // alone isn't enough to know which survey's stamp service to hit.
+  // Defaulting to the primary's panel survey keeps in-survey callers
+  // working unchanged.
+  window.setSelectedIdentifier = function (ident, survey, oid) {
     if (!ident) return;
     window._selectedIdentifier = String(ident);
+    window._selectedSurvey = survey || null;
     if (window.updateStampsForIdentifier) {
-      window.updateStampsForIdentifier(window._selectedIdentifier);
+      window.updateStampsForIdentifier(window._selectedIdentifier, survey, oid);
     }
     redrawHighlightedCharts();
     replaceUrlIdentifier(window._selectedIdentifier);

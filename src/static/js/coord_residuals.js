@@ -227,7 +227,17 @@
           const { datasetIndex, index } = elements[0];
           const p = chart.data.datasets[datasetIndex].data[index];
           if (p?.has_stamp && p.identifier && window.setSelectedIdentifier) {
-            window.setSelectedIdentifier(p.identifier);
+            // Each point carries its survey from buildDatasets; pair it
+            // with the matched OID off the LC chart so cross-survey
+            // clicks dispatch to the right stamp service.
+            const lcChart = lcChartFor(canvas);
+            const primaryOid = lcChart && lcChart.canvas
+              ? lcChart.canvas.id.replace(/^lc-canvas-/, "")
+              : "";
+            const useOid = (lcChart && p.survey && p.survey !== lcChart.$lcSurvey)
+              ? (lcChart.$lcXOid || primaryOid)
+              : primaryOid;
+            window.setSelectedIdentifier(p.identifier, p.survey, useOid);
           }
         },
         onHover: (evt, elements) => {

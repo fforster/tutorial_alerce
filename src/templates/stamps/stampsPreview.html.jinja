@@ -19,8 +19,23 @@
   class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4"
   data-oid="{{ oid }}"
   data-survey="{{ survey_id }}"
+  {#
+    Two flavors of URL template attached:
+      - `data-url-template-{type}`: primary-survey URL with the OID baked in,
+        only `__IDENT__` left to substitute. Used for in-survey clicks (the
+        common case) and for the picker dropdown.
+      - `data-url-template-{type}-{survey}`: per-survey URL with BOTH
+        `__OID__` and `__IDENT__` to substitute. Used when a click lands on
+        a cross-survey LC point — the JS pulls the matched OID off the LC
+        chart's `$lcXOid` and renders the right survey's stamp service.
+  #}
   {% for t in ctx.stamp_types %}
     data-url-template-{{ t }}="{{ ctx.stamp_url_templates[t] }}"
+  {% endfor %}
+  {% for s, by_type in ctx.stamp_url_templates_by_survey.items() %}
+    {% for t in ctx.stamp_types %}
+    data-url-template-{{ t }}-{{ s }}="{{ by_type[t] }}"
+    {% endfor %}
   {% endfor %}
 >
   <div class="tw-flex tw-items-center tw-justify-between tw-mb-3 tw-gap-3">
@@ -74,12 +89,20 @@
         name="identifier"
         onchange="window.updateStampsForIdentifier && window.updateStampsForIdentifier(this.value)"
       >
+        {#
+          Each option labels the band with its survey ("LSST g", "ZTF r")
+          so the band letter is unambiguous when a cross-survey overlay is
+          loaded — `g` means different things on the two telescopes.
+          Picker entries today come from the primary survey only, but the
+          per-row tagging is forward-compatible with a future cross-survey
+          picker extension.
+        #}
         {% for d in ctx.detections %}
           <option
             value="{{ d.identifier }}"
             {% if ctx.selected and d.identifier == ctx.selected.identifier %}selected{% endif %}
           >
-            MJD {{ "%.3f"|format(d.mjd) }}{% if d.band %} · {{ d.band }}{% endif %}
+            MJD {{ "%.3f"|format(d.mjd) }}{% if d.band %} · {{ survey_id|upper }} {{ d.band }}{% endif %}
           </option>
         {% endfor %}
       </select>

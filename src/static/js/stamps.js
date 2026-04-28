@@ -388,20 +388,45 @@
     (root || document).querySelectorAll("canvas.stamp-canvas").forEach(initCanvas);
   }
 
-  // Zero-round-trip identifier swap: the server emits stamp URL templates with
-  // __IDENT__ placeholders as data attrs on #stamps-panel. We rewrite each
-  // canvas's URL locally and force a re-render — no hit to our server.
-  window.updateStampsForIdentifier = function (ident) {
+  // Zero-round-trip identifier swap: the server emits stamp URL templates
+  // with __OID__ + __IDENT__ placeholders as data attrs on #stamps-panel.
+  // We rewrite each canvas's URL locally and force a re-render — no hit to
+  // our server.
+  //
+  // Cross-survey awareness: `survey` and `oid` arguments dispatch to the
+  // matching per-survey template (`data-url-template-{type}-{survey}`)
+  // with BOTH placeholders to substitute. Defaults — `survey` falls back
+  // to the panel's primary, `oid` to the primary OID baked into
+  // `data-oid` — preserve the in-survey path for callers that don't yet
+  // pass the extra arguments.
+  window.updateStampsForIdentifier = function (ident, survey, oid) {
     if (!ident) return;
     const panel = document.getElementById("stamps-panel");
     if (!panel) return;
+    const useSurvey = survey || panel.dataset.survey || "";
+    const useOid = oid || panel.dataset.oid || "";
     const canvases = panel.querySelectorAll("canvas.stamp-canvas");
     canvases.forEach((canvas) => {
       const type = canvas.dataset.stampType;
-      const tpl = panel.dataset[`urlTemplate${type.charAt(0).toUpperCase() + type.slice(1)}`]
-        || panel.getAttribute(`data-url-template-${type}`);
-      if (!tpl) return;
-      canvas.dataset.stampUrl = tpl.replace("__IDENT__", encodeURIComponent(ident));
+      // Prefer the per-survey template (has both placeholders) so cross-
+      // survey clicks land on the matched object. Fall back to the legacy
+      // primary-only template (OID baked in, __IDENT__ swappable) when
+      // the per-survey one isn't present — keeps older snapshots working.
+      const perSurvey = useSurvey
+        ? panel.getAttribute(`data-url-template-${type}-${useSurvey}`)
+        : null;
+      const legacyTpl = panel.getAttribute(`data-url-template-${type}`);
+      let url;
+      if (perSurvey) {
+        url = perSurvey
+          .replace("__OID__", encodeURIComponent(useOid))
+          .replace("__IDENT__", encodeURIComponent(ident));
+      } else if (legacyTpl) {
+        url = legacyTpl.replace("__IDENT__", encodeURIComponent(ident));
+      } else {
+        return;
+      }
+      canvas.dataset.stampUrl = url;
       rendered.delete(canvas);
       cache.delete(canvas);
       const card = canvas.closest(".tw-relative") || canvas.parentElement;
@@ -414,7 +439,14 @@
       initCanvas(canvas);
     });
     const picker = panel.querySelector('select[name="identifier"]');
-    if (picker && picker.value !== String(ident)) picker.value = String(ident);
+    // Only sync the picker to the current identifier when the click stayed
+    // in the primary survey — the picker is built from the primary's
+    // detection list, so a cross-survey identifier wouldn't match any
+    // option anyway. Leaving the picker on its previous selection beats
+    // silently clearing it.
+    if (picker && useSurvey === panel.dataset.survey) {
+      if (picker.value !== String(ident)) picker.value = String(ident);
+    }
   };
 
   // Apply a zoom factor (relative multiplier, or the string "reset") to every

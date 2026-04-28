@@ -1318,6 +1318,18 @@ def test_stamps_renders_picker_and_canvases(client, monkeypatch):
                 "template": "https://x/template?id=__IDENT__",
                 "difference": "https://x/difference?id=__IDENT__",
             },
+            "stamp_url_templates_by_survey": {
+                "lsst": {
+                    "science": "https://lsst/science?oid=__OID__&id=__IDENT__",
+                    "template": "https://lsst/template?oid=__OID__&id=__IDENT__",
+                    "difference": "https://lsst/difference?oid=__OID__&id=__IDENT__",
+                },
+                "ztf": {
+                    "science": "https://ztf/science?oid=__OID__&id=__IDENT__",
+                    "template": "https://ztf/template?oid=__OID__&id=__IDENT__",
+                    "difference": "https://ztf/difference?oid=__OID__&id=__IDENT__",
+                },
+            },
         }
 
     monkeypatch.setattr(
@@ -1334,12 +1346,19 @@ def test_stamps_renders_picker_and_canvases(client, monkeypatch):
     # Picker options reference both identifiers.
     assert 'value="111"' in r.text
     assert 'value="222"' in r.text
-    # Client-side identifier sync: URL templates emitted as data attrs, and the
-    # picker's onchange calls the global helper (no htmx roundtrip).
+    # Client-side identifier sync: legacy URL templates emitted as data attrs,
+    # and the picker's onchange calls the global helper (no htmx roundtrip).
     assert 'data-url-template-science="https://x/science?id=__IDENT__"' in r.text
     assert 'data-url-template-template=' in r.text
     assert 'data-url-template-difference=' in r.text
     assert "updateStampsForIdentifier" in r.text
+    # Per-survey URL templates carry both __OID__ and __IDENT__ placeholders
+    # so cross-survey clicks can dispatch to the matching survey's stamp
+    # service (the JS pulls the matched OID off the LC chart's $lcXOid).
+    assert 'data-url-template-science-lsst="https://lsst/science?oid=__OID__&amp;id=__IDENT__"' in r.text
+    assert 'data-url-template-science-ztf="https://ztf/science?oid=__OID__&amp;id=__IDENT__"' in r.text
+    assert 'data-url-template-template-lsst=' in r.text
+    assert 'data-url-template-difference-ztf=' in r.text
     # Zoom controls — three buttons (−, reset, +) wired to window.zoomStamps.
     assert "stamps-zoom-btn" in r.text
     assert "stamps-zoom-reset" in r.text
@@ -1360,6 +1379,7 @@ def test_stamps_empty_shows_message(client, monkeypatch):
                 "template": "https://x/template?id=__IDENT__",
                 "difference": "https://x/difference?id=__IDENT__",
             },
+            "stamp_url_templates_by_survey": {},
         }
 
     monkeypatch.setattr(

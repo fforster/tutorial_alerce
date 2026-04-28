@@ -78,6 +78,21 @@ def shape_stamps_context(
         t: cfg.stamp_url(oid=oid, identifier="__IDENT__", stamp_type=t)
         for t in STAMP_TYPES
     }
+    # Per-survey templates with BOTH oid and identifier as placeholders, so
+    # cross-survey clicks (a ZTF point on an LSST primary view, or vice
+    # versa) can be served the matched counterpart's stamp without the
+    # client knowing each survey's URL shape. The cross-survey OID lands
+    # client-side via lcSetCrossSurvey (`chart.$lcXOid`) and is substituted
+    # at click time. Includes the primary survey too so the dispatcher
+    # doesn't need a special case for the in-survey path.
+    from .survey_config import known_surveys
+    stamp_url_templates_by_survey = {
+        s: {
+            t: SC(s).stamp_url(oid="__OID__", identifier="__IDENT__", stamp_type=t)
+            for t in STAMP_TYPES
+        }
+        for s in known_surveys()
+    }
 
     return {
         "oid": oid,
@@ -87,6 +102,7 @@ def shape_stamps_context(
         "stamp_types": list(STAMP_TYPES),
         "stamp_urls": stamp_urls,
         "stamp_url_templates": stamp_url_templates,
+        "stamp_url_templates_by_survey": stamp_url_templates_by_survey,
     }
 
 

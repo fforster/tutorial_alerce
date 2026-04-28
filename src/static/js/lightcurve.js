@@ -848,9 +848,20 @@
         onClick: (_evt, elements) => {
           if (!elements.length) return;
           const { datasetIndex, index } = elements[0];
-          const p = chart.data.datasets[datasetIndex].data[index];
+          const ds = chart.data.datasets[datasetIndex];
+          const p = ds && ds.data[index];
           if (p?.has_stamp && p.identifier && window.setSelectedIdentifier) {
-            window.setSelectedIdentifier(p.identifier);
+            // Dispatch by the dataset's $survey so cross-survey clicks
+            // (a ZTF point on an LSST view, or vice versa) hit the
+            // matching survey's stamp service. The OID switches between
+            // the primary (canvas id is `lc-canvas-{oid}`) and the
+            // matched cross-survey OID (`chart.$lcXOid`) accordingly.
+            const dsSurvey = ds.$survey || chart.$lcSurvey || "";
+            const primaryOid = chart.canvas.id.replace(/^lc-canvas-/, "");
+            const useOid = (dsSurvey && dsSurvey !== chart.$lcSurvey)
+              ? (chart.$lcXOid || primaryOid)
+              : primaryOid;
+            window.setSelectedIdentifier(p.identifier, dsSurvey, useOid);
           }
         },
         onHover: (evt, elements) => {
