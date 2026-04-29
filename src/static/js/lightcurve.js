@@ -23,6 +23,12 @@
     unknown: "#888888",
   };
 
+  // Frequency ordering used by the per-band Offset toggle. Bands missing from
+  // this table get rank 0 (no spread term — only the centering subtraction
+  // applies). LSST's "y" arrives lowercase from the server; tolerate "Y" too
+  // in case a future survey uses the upper-case convention.
+  const BAND_RANK = { u: 0, g: 1, r: 2, i: 3, z: 4, y: 5, Y: 5 };
+
   const AB_ZP_NJY = 31.4;
   const LN10_OVER_2P5 = Math.log(10) / 2.5;
 
@@ -230,25 +236,29 @@
   // computed from the symmetric flux error (flux ± eFlux) and then
   // converted — the faint side may go to +∞ when (flux − eFlux) ≤ 0,
   // which the renderer draws as an arrow reaching the chart edge.
-  function projectPoint(p, axisMode, sourceMode, distMod, extMag) {
+  function projectPoint(p, axisMode, sourceMode, distMod, extMag, offsetMag) {
     const flux = sourceMode === "sci" ? p.sci_flux : p.flux;
     const eFlux = sourceMode === "sci" ? p.e_sci_flux : p.e_flux;
     if (flux == null) return null;
     const A = extMag || 0;
     const mu = distMod || 0;
+    // Per-band Offset toggle: m_new = m_old + Δ in mag space; equivalent
+    // multiplicative 10^(−0.4·Δ) in flux space (errors scale by the same
+    // factor so SNR is preserved). 0 = no shift.
+    const dMag = offsetMag || 0;
     if (axisMode === "mag") {
       if (flux <= 0) return null;
-      const mag = AB_ZP_NJY - 2.5 * Math.log10(flux) - A - mu;
+      const mag = AB_ZP_NJY - 2.5 * Math.log10(flux) - A - mu + dMag;
       // Representative ± for the tooltip (small-error approximation).
       const e = eFlux != null && eFlux > 0 ? eFlux / flux / LN10_OVER_2P5 : null;
       let yLo = null, yHi = null;
       if (eFlux != null && eFlux > 0) {
         // Bright side: flux + e → smaller mag (finite as long as flux>0).
-        yLo = AB_ZP_NJY - 2.5 * Math.log10(flux + eFlux) - A - mu;
+        yLo = AB_ZP_NJY - 2.5 * Math.log10(flux + eFlux) - A - mu + dMag;
         // Faint side: flux − e → larger mag, +∞ when non-positive.
         const fluxLo = flux - eFlux;
         yHi = fluxLo > 0
-          ? AB_ZP_NJY - 2.5 * Math.log10(fluxLo) - A - mu
+          ? AB_ZP_NJY - 2.5 * Math.log10(fluxLo) - A - mu + dMag
           : Infinity;
       }
       // `mjd` rides alongside `x` so the tooltip can format a UTC date
@@ -267,6 +277,11 @@
       const scaleD = Math.pow(10, 0.4 * distMod);
       y *= scaleD;
       if (e != null) e *= scaleD;
+    }
+    if (dMag !== 0) {
+      const scaleO = Math.pow(10, -0.4 * dMag);
+      y *= scaleO;
+      if (e != null) e *= scaleO;
     }
     const yLo = e != null ? y - e : null;
     const yHi = e != null ? y + e : null;
@@ -324,16 +339,18 @@
   const OVERLAY_DASH = { spm: [6, 4], fleet: [2, 3], tde: [5, 2, 1, 2] };
 
   // Convert a model magnitude into whatever the axis expects, applying the
-  // same distMod + extinction corrections `projectPoint` applies to detections.
-  // Returns null when the projection would need log of a non-positive number.
-  function projectModel(mag, axisMode, distMod, extMag) {
+  // same distMod + extinction + band-offset corrections `projectPoint`
+  // applies to detections. Returns null when the projection would need
+  // log of a non-positive number.
+  function projectModel(mag, axisMode, distMod, extMag, offsetMag) {
     if (!isFinite(mag)) return null;
     const A = extMag || 0;
     const mu = distMod || 0;
-    if (axisMode === "mag") return mag - A - mu;
-    // Flux path: mag → flux (nJy) and then apply the A + μ scalings.
+    const dMag = offsetMag || 0;
+    if (axisMode === "mag") return mag - A - mu + dMag;
+    // Flux path: mag → flux (nJy) and then apply the A + μ + offset scalings.
     const flux = Math.pow(10, (AB_ZP_NJY - mag) / 2.5);
-    const scale = Math.pow(10, 0.4 * (A + mu));
+    const scale = Math.pow(10, 0.4 * (A + mu - dMag));
     return flux * scale;
   }
 
@@ -371,11 +388,11 @@
   // (optional) fold, return a sorted {x,y} array ready for Chart.js. Returns
   // null for points the projection rejects (e.g. mag at non-positive flux
   // after extinction brings it below zero — shouldn't happen in practice).
-  function projectOverlayGrid(gridMags, bandName, axisMode, distMod, extByBand, foldPeriod) {
+  function projectOverlayGrid(gridMags, bandName, axisMode, distMod, extByBand, foldPeriod, offsetMag) {
     const extMag = (extByBand || {})[bandName] || 0;
     const pts = gridMags
       .map(({ mjd, mag }) => {
-        const y = projectModel(mag, axisMode, distMod, extMag);
+        const y = projectModel(mag, axisMode, distMod, extMag, offsetMag);
         return y == null || !isFinite(y) ? null : { x: mjd, y };
       })
       .filter(Boolean);
@@ -402,7 +419,7 @@
     };
   }
 
-  function computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod) {
+  function computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod, offsetFor) {
     if (!fits || !fits.spm) return [];
     const env = mjdEnvelope(bands);
     if (!env) return [];
@@ -421,8 +438,12 @@
         const mag = AB_ZP_NJY - 2.5 * Math.log10(fluxNjy);
         grid.push({ mjd: env.min + t, mag });
       }
-      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod);
-      if (pts.length) traces.push(makeOverlayDataset("spm", band, pts));
+      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod, offsetFor(band));
+      if (pts.length) {
+        const ds = makeOverlayDataset("spm", band, pts);
+        ds.$band = band;
+        traces.push(ds);
+      }
     }
     return traces;
   }
@@ -445,7 +466,7 @@
     return Math.exp(w * dt) - a * w * dt + m0;
   }
 
-  function computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod) {
+  function computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod, offsetFor) {
     if (!fits || !fits.fleet) return [];
     const env = mjdEnvelope(bands);
     if (!env) return [];
@@ -482,8 +503,12 @@
         if (!isFinite(mag)) continue;
         grid.push({ mjd, mag });
       }
-      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod);
-      if (pts.length) traces.push(makeOverlayDataset("fleet", band, pts));
+      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod, offsetFor(band));
+      if (pts.length) {
+        const ds = makeOverlayDataset("fleet", band, pts);
+        ds.$band = band;
+        traces.push(ds);
+      }
     }
     return traces;
   }
@@ -492,7 +517,7 @@
   // t_peak is data-derived (not stored): brightest detection in-band passing
   // e_mag < 1.0 and mag < 30, matching the extractor. We only have fluxes in
   // the client, so we derive mag/e_mag from flux/eFlux (ZP 31.4 in nJy).
-  function computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod) {
+  function computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod, offsetFor) {
     if (!fits || !fits.tde) return [];
     const traces = [];
     for (const [band, p] of Object.entries(fits.tde)) {
@@ -522,26 +547,34 @@
         if (!isFinite(mag)) continue;
         grid.push({ mjd, mag });
       }
-      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod);
-      if (pts.length) traces.push(makeOverlayDataset("tde", band, pts));
+      const pts = projectOverlayGrid(grid, band, axisMode, distMod, extByBand, foldPeriod, offsetFor(band));
+      if (pts.length) {
+        const ds = makeOverlayDataset("tde", band, pts);
+        ds.$band = band;
+        traces.push(ds);
+      }
     }
     return traces;
   }
 
-  function buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod) {
+  function buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod, offsetMap) {
     const fits = chart.$lcFits;
     const key = chart.$lcOverlay;
     if (!fits || !key || key === "none") return [];
     const bands = (chart.$lcRaw && chart.$lcRaw.bands) || [];
     const fpBands = (chart.$lcRaw && chart.$lcRaw.fpBands) || [];
+    // Offset is keyed by band letter (a g overlay gets the same Δ as a g
+    // detection on either survey). Falls back to 0 when Offset is off or
+    // the band has no entry.
+    const survey = chart.$lcSurvey || "";
+    const offsetFor = (band) => (offsetMap && offsetMap.get(band)) || 0;
     let traces = [];
-    if (key === "spm") traces = computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
-    else if (key === "fleet") traces = computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod);
-    else if (key === "tde") traces = computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod);
+    if (key === "spm") traces = computeSPMTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod, offsetFor);
+    else if (key === "fleet") traces = computeFleetTraces(fits, bands, fpBands, axisMode, distMod, extByBand, foldPeriod, offsetFor);
+    else if (key === "tde") traces = computeTDETailTraces(fits, bands, axisMode, distMod, extByBand, foldPeriod, offsetFor);
     // Stamp survey + kind so the legend grouper places overlays under the
     // primary survey's header (overlays derive from the primary's features
     // — LSST has no features endpoint today, so in practice they're ZTF).
-    const survey = chart.$lcSurvey || "";
     for (const t of traces) {
       t.$survey = survey;
       t.$kind = "overlay";
@@ -593,11 +626,14 @@
     strip.classList.remove("tw-hidden");
   }
 
-  function buildDatasets(bands, fpBands, drBands, axisMode, sourceMode, distMod, extByBand, drAlpha, foldPeriod, survey) {
+  function buildDatasets(bands, fpBands, drBands, axisMode, sourceMode, distMod, extByBand, drAlpha, foldPeriod, survey, offsetMap) {
     const extFor = (name) => (extByBand || {})[name] || 0;
+    const offsetFor = (name) =>
+      (offsetMap && offsetMap.get(name)) || 0;
     const project = (band) => {
+      const dMag = offsetFor(band.name);
       const rows = band.points
-        .map((p) => projectPoint(p, axisMode, sourceMode, distMod, extFor(band.name)))
+        .map((p) => projectPoint(p, axisMode, sourceMode, distMod, extFor(band.name), dMag))
         .filter(Boolean);
       return foldPeriod ? foldDataset(rows, foldPeriod) : rows;
     };
@@ -606,6 +642,7 @@
       label: b.name,
       $survey: survey,
       $kind: "det",
+      $band: b.name,
       data: project(b),
       backgroundColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
@@ -625,6 +662,7 @@
       label: `${b.name} (FP)`,
       $survey: survey,
       $kind: "fp",
+      $band: b.name,
       data: project(b),
       backgroundColor: "transparent",
       borderColor: BAND_COLORS[b.name] || BAND_COLORS.unknown,
@@ -650,6 +688,7 @@
         label: `${b.name} (DR)`,
         $survey: survey,
         $kind: "dr",
+        $band: b.name,
         data: project(b),
         // Hollow square: transparent fill + alpha-tinted border. The
         // border alpha lets the user fade the DR overlay via the slider
@@ -683,6 +722,107 @@
     if (typeof window.cosmology === "undefined") return null;
     const mu = window.cosmology.distanceModulus(z);
     return isFinite(mu) ? mu : null;
+  }
+
+  // ── Per-band Offset (visual band separation) ─────────────────────────────
+  //
+  // Builds a Map keyed by band letter → Δ_b (mag, rounded to 0.1) used by
+  // buildDatasets / buildOverlayDatasets to separate bands on the Y axis
+  // without losing the absolute scale (centering removes the band's typical
+  // magnitude; rank × step adds a deterministic per-band shift).
+  //
+  // The map key is the band name alone — LSST g and ZTF g share the same
+  // Δ, and so do detections, forced photometry, DR, and overlay traces of
+  // that band. The centering statistic pools magnitudes from detections +
+  // FP across both surveys (DR stays out so toggling it on/off doesn't
+  // shift the centering of the rest of the chart).
+  function statOf(values, kind) {
+    if (!values.length) return 0;
+    if (kind === "max") return Math.max(...values);
+    if (kind === "min") return Math.min(...values);
+    if (kind === "mean") {
+      let s = 0;
+      for (const v of values) s += v;
+      return s / values.length;
+    }
+    // median (default): O(n log n) is plenty for the band sizes we plot.
+    const sorted = values.slice().sort((a, b) => a - b);
+    const m = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[m] : 0.5 * (sorted[m - 1] + sorted[m]);
+  }
+
+  // Mags for the centering pool must mirror what projectPoint will actually
+  // display: pick sci_flux when Sci mode is on, and subtract per-band A_λ
+  // when Der is on. distMod is a single scalar applied to every band so it
+  // cancels out of the mean-subtraction step and is intentionally not
+  // applied here. Without this, the centering would be computed from a
+  // different projection than the one shown on screen — bands aligned in
+  // Diff would scatter back the moment the user toggled to Sci, and Der
+  // toggles would re-skew the centering when the user expects them to be
+  // a band-uniform shift.
+  function magsOfBand(band, sourceMode, extMag) {
+    const out = [];
+    const A = extMag || 0;
+    for (const p of band.points || []) {
+      const flux = sourceMode === "sci" ? p.sci_flux : p.flux;
+      if (!(flux > 0)) continue;
+      out.push(AB_ZP_NJY - 2.5 * Math.log10(flux) - A);
+    }
+    return out;
+  }
+
+  function computeOffsetMap(chart, sourceMode, extByBand) {
+    if (chart.$lcOffset !== "on") return new Map();
+    const center = chart.$lcOffsetCenter || "median";
+    const step = isFinite(chart.$lcOffsetStep) ? chart.$lcOffsetStep : 0;
+    const out = new Map();
+    // Pool magnitudes by band letter across both surveys and across det + FP
+    // so a g band gets one Δ regardless of where the photometry came from.
+    const pool = new Map();  // band → number[]
+    const addBands = (bands) => {
+      for (const b of bands || []) {
+        const mags = magsOfBand(b, sourceMode, (extByBand || {})[b.name] || 0);
+        if (!mags.length) continue;
+        if (!pool.has(b.name)) pool.set(b.name, []);
+        const arr = pool.get(b.name);
+        for (const m of mags) arr.push(m);
+      }
+    };
+    if (chart.$lcRaw) {
+      addBands(chart.$lcRaw.bands);
+      addBands(chart.$lcRaw.fpBands);
+    }
+    if (chart.$lcXRaw) {
+      addBands(chart.$lcXRaw.bands);
+      addBands(chart.$lcXRaw.fpBands);
+    }
+    if (!pool.size) return out;
+    // Pass 1: raw per-band shift = −C_b − step × rank_b. The rank term is
+    // *subtracted*: in mag mode the axis is reversed (brighter = up), so a
+    // negative Δ for higher-rank bands pushes them upward — matching the
+    // intuition that clicking ^ should move the redder bands up. In flux
+    // mode the multiplicative factor 10^(−0.4·Δ) grows for negative Δ, so
+    // higher-rank bands also move up. step is clamped to [0, ∞) by the
+    // stepper bindings so this term only ever spreads, never compresses.
+    const raws = [];
+    for (const [band, mags] of pool) {
+      const C = statOf(mags, center);
+      const rank = BAND_RANK[band] != null ? BAND_RANK[band] : 0;
+      raws.push({ band, raw: -C - step * rank });
+    }
+    // Pass 2: subtract the mean across all bands. A constant added to every
+    // Δ_b just translates the whole chart vertically without separating the
+    // bands, so removing it keeps the legend numbers as small as possible
+    // (and centred on zero) while the visual separation is identical.
+    let sum = 0;
+    for (const r of raws) sum += r.raw;
+    const meanRaw = sum / raws.length;
+    for (const { band, raw } of raws) {
+      // Round the *displayed* total to 0.1 mag so the legend value is what
+      // actually got applied to the points.
+      out.set(band, Math.round((raw - meanRaw) * 10) / 10);
+    }
+    return out;
   }
 
   // Per-band A_λ = R_λ · E(B-V) when Der mode is armed with a positive
@@ -768,9 +908,15 @@
     const foldPeriod =
       chart.$lcFold === "fold" && chart.$lcPeriod > 0 ? chart.$lcPeriod : null;
     const primarySurvey = chart.$lcSurvey || "";
+    // Per-(survey, band) Offset map: empty when the toggle is off, so the
+    // 5th projectPoint arg degenerates to 0 and nothing shifts. Stashed on
+    // the chart so the legend's generateLabels can read the same Δ values
+    // and append " ± X.X" suffixes consistent with what the points show.
+    const offsetMap = computeOffsetMap(chart, sourceMode, extByBand);
+    chart.$lcOffsetMap = offsetMap;
     const baseDatasets = buildDatasets(
       raw.bands, raw.fpBands, drBands, axisMode, sourceMode, distMod, extByBand,
-      chart.$lcDrAlpha, foldPeriod, primarySurvey,
+      chart.$lcDrAlpha, foldPeriod, primarySurvey, offsetMap,
     );
     // Cross-survey overlay (the *other* survey's matched source). Stays empty
     // until /htmx/lc_xsurvey lands and `lcSetCrossSurvey` populates `$lcXRaw`.
@@ -781,10 +927,10 @@
     const xDatasets = (xRaw && xRaw.survey)
       ? buildDatasets(
           xRaw.bands || [], xRaw.fpBands || [], [], axisMode, sourceMode,
-          distMod, extByBand, chart.$lcDrAlpha, foldPeriod, xRaw.survey,
+          distMod, extByBand, chart.$lcDrAlpha, foldPeriod, xRaw.survey, offsetMap,
         )
       : [];
-    const overlayDatasets = buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod);
+    const overlayDatasets = buildOverlayDatasets(chart, axisMode, distMod, extByBand, foldPeriod, offsetMap);
     chart.data.datasets = [...baseDatasets, ...xDatasets, ...overlayDatasets];
     // New entries (e.g. just-arrived FP / xsurvey / freshly-armed overlay)
     // aren't in the snapshot and stay visible by default. Existing keys
@@ -1057,6 +1203,18 @@
                   if (kind === "dr") return text.replace(/\s*\(DR\)\s*$/, "");
                   return text;
                 };
+                // Per-band Offset suffix: " + 0.5" / " − 0.3" / "" when zero
+                // or off. Reads from the same map applyModes built and stashed,
+                // so the displayed Δ matches what was actually applied to the
+                // points. Headers never get a suffix (offset is per-band).
+                const offsetMap = ch.$lcOffsetMap;
+                const offOn = ch.$lcOffset === "on";
+                const offsetSuffix = (ds) => {
+                  if (!offOn || !offsetMap) return "";
+                  const d = offsetMap.get(ds.$band || "");
+                  if (d == null || d === 0) return "";
+                  return ` ${d > 0 ? "+" : "−"} ${Math.abs(d).toFixed(1)}`;
+                };
                 // groups[survey][kind] → [item, …]
                 const groups = new Map();
                 ch.data.datasets.forEach((ds, i) => {
@@ -1070,7 +1228,7 @@
                   const byKind = groups.get(survey);
                   if (!byKind.has(kind)) byKind.set(kind, []);
                   byKind.get(kind).push({
-                    text: stripSuffix(ds.label, kind),
+                    text: stripSuffix(ds.label, kind) + offsetSuffix(ds),
                     fillStyle: fill,
                     strokeStyle: stroke,
                     lineWidth: ds.borderWidth || 1,
@@ -1196,6 +1354,17 @@
     chart.$lcDered = restored.dered === "dered" ? "dered" : "obs";
     chart.$lcEbv = null;  // set below from input after pre-fill
     chart.$lcExtR = extR;
+    // Per-band Offset state — ephemeral, NOT persisted across object
+    // navigation (z and ebv aren't either; offset is similarly object-
+    // specific because the centering values it depends on differ per
+    // object). Defaults: off, min centering, 0.5 mag step → activating
+    // immediately shows bands aligned at their brightest with a 0.5 mag
+    // per-rank spread (≈ visible separation right away). The +/− stepper
+    // tunes the spread from there.
+    chart.$lcOffset = "off";
+    chart.$lcOffsetCenter = "min";
+    chart.$lcOffsetStep = 0.5;
+    chart.$lcOffsetMap = null;
     // Fold: the period lives on the Fold button's data-lc-period, which
     // the deferred /htmx/lc_features fragment stamps once features arrive.
     // On the synchronous render path we don't yet have a period (the
@@ -1766,6 +1935,100 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  // ── Offset controls (toggle + centering select + +/- stepper) ────────────
+  //
+  // Three small bindings, all converging on `applyModes(chart)` so the same
+  // re-projection path the other axis toggles use also handles the offset.
+  // Visibility memory survives because (survey, kind, label) — the dataset
+  // identity used by snapshot/applyVisibility — never changes when offset
+  // changes.
+
+  function setOffsetButtonState(btn, on) {
+    btn.dataset.lcOffset = on ? "on" : "off";
+    // Mirror the activeValue styling that setCycleValue uses for the Fold
+    // button so Offset reads as "armed" with the same visual cue.
+    btn.classList.toggle("tw-text-accent", on);
+    btn.classList.toggle("tw-border-accent", on);
+    btn.classList.toggle("tw-text-text-muted", !on);
+    btn.classList.toggle("tw-border-border", !on);
+    const wrap = document.querySelector(`.lc-offset-wrap[data-target="${btn.dataset.target}"]`);
+    if (wrap) wrap.classList.toggle("tw-hidden", !on);
+  }
+
+  // Refresh the +/- buttons' tooltips so the current step is discoverable
+  // without crowding the toolbar with a dedicated step display. The legend
+  // shows the resulting per-band Δ values, which is the value the user
+  // ultimately cares about.
+  function setStepTooltips(target, step) {
+    const fmt = step.toFixed(1);
+    const up = document.querySelector(`.lc-offset-step-up[data-target="${target}"]`);
+    const dn = document.querySelector(`.lc-offset-step-dn[data-target="${target}"]`);
+    if (up) up.title = `Increase per-rank spread by 0.1 mag (current: ${fmt}).`;
+    if (dn) dn.title = `Decrease per-rank spread by 0.1 mag (current: ${fmt}).`;
+  }
+
+  function bindOffsetToggle(btn) {
+    if (btn.$bound) return;
+    btn.$bound = true;
+    btn.addEventListener("click", () => {
+      const canvas = document.getElementById(btn.dataset.target);
+      const chart = canvas && charts.get(canvas);
+      if (!chart) return;
+      chart.$lcOffset = chart.$lcOffset === "on" ? "off" : "on";
+      setOffsetButtonState(btn, chart.$lcOffset === "on");
+      applyModes(chart);
+    });
+    // Sync visual state to chart's current offset (defaults to "off"; this
+    // also handles the case where the wrapper attribute drifted).
+    const canvas = document.getElementById(btn.dataset.target);
+    const chart = canvas && charts.get(canvas);
+    if (chart) setOffsetButtonState(btn, chart.$lcOffset === "on");
+  }
+
+  function bindOffsetCenter(sel) {
+    if (sel.$bound) return;
+    sel.$bound = true;
+    sel.addEventListener("change", () => {
+      const canvas = document.getElementById(sel.dataset.target);
+      const chart = canvas && charts.get(canvas);
+      if (!chart) return;
+      chart.$lcOffsetCenter = sel.value;
+      applyModes(chart);
+    });
+    // Seed the dropdown from the chart's stored centering choice.
+    const canvas = document.getElementById(sel.dataset.target);
+    const chart = canvas && charts.get(canvas);
+    if (chart && chart.$lcOffsetCenter) sel.value = chart.$lcOffsetCenter;
+  }
+
+  // Step bumper: ±0.1 mag per click, clamped to ±5 mag (a 5-mag spread
+  // between adjacent bands is already absurd; further clicks would just
+  // drag bands off the visible Y range without adding information).
+  function bindOffsetStep(btn, delta) {
+    if (btn.$bound) return;
+    btn.$bound = true;
+    btn.addEventListener("click", () => {
+      const canvas = document.getElementById(btn.dataset.target);
+      const chart = canvas && charts.get(canvas);
+      if (!chart) return;
+      const cur = isFinite(chart.$lcOffsetStep) ? chart.$lcOffsetStep : 0;
+      // Snap to a multiple of 0.1 to avoid IEEE drift accumulating across
+      // many clicks (otherwise the rounded total in the legend can flicker).
+      // Floor at 0: the step is the magnitude of the spread, not a signed
+      // direction — clicking v past 0 would invert which bands move up,
+      // which the ^/v arrows aren't supposed to do.
+      const next = Math.max(0, Math.min(5, Math.round((cur + delta) * 10) / 10));
+      chart.$lcOffsetStep = next;
+      const offBtn = document.querySelector(`.lc-offset-toggle[data-target="${btn.dataset.target}"]`);
+      if (offBtn) offBtn.dataset.lcStep = next.toFixed(1);
+      setStepTooltips(btn.dataset.target, next);
+      // Re-project even when Offset is currently off — keeping step in sync
+      // means turning Offset on later picks up the latest value without an
+      // extra click. applyModes is a no-op for the offset path when off.
+      applyModes(chart);
+    });
+  }
+
   function bindDownloadButton(btn) {
     if (btn.dataset.lcDownloadBound === "1") return;
     btn.dataset.lcDownloadBound = "1";
@@ -1787,6 +2050,10 @@
     scope.querySelectorAll(".lc-dr-toggle").forEach(bindDrButton);
     scope.querySelectorAll(".lc-dr-alpha").forEach(bindDrAlphaSlider);
     scope.querySelectorAll(".lc-overlay-select").forEach(bindOverlaySelect);
+    scope.querySelectorAll(".lc-offset-toggle").forEach(bindOffsetToggle);
+    scope.querySelectorAll(".lc-offset-center").forEach(bindOffsetCenter);
+    scope.querySelectorAll(".lc-offset-step-up").forEach((b) => bindOffsetStep(b, +0.1));
+    scope.querySelectorAll(".lc-offset-step-dn").forEach((b) => bindOffsetStep(b, -0.1));
     scope.querySelectorAll(".lc-download-btn").forEach(bindDownloadButton);
   }
 

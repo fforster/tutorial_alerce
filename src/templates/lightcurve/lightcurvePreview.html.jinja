@@ -48,6 +48,7 @@
         <li><strong class="tw-text-text-primary">Obs ↔ Der</strong> — observed ↔ dereddened (Fitzpatrick 1999, A<sub>λ</sub> = R<sub>λ</sub> × E(B-V) per band; requires E(B-V) &gt; 0)</li>
         <li><strong class="tw-text-text-primary">ZTF DR</strong> — archival ZTF science photometry at this sky position (cone 1.5″); Sci mode only</li>
         <li><strong class="tw-text-text-primary">Overlay</strong> — parametric model fit from the latest feature-extractor version (SPM, FLEET, or TDE tail), when available</li>
+        <li><strong class="tw-text-text-primary">Offset</strong> — visual band separation: subtract each band's mean / median / max / min, then spread by step × frequency rank (u<g<r<i<z<Y). The +/− bumps the spread by 0.1 mag; legend shows the per-band Δ in mag (multiplicative in Flux mode)</li>
       </ul>
     {% endcall %}
     <div class="tw-flex tw-items-center tw-gap-1.5 tw-flex-wrap tw-justify-end">
@@ -135,6 +136,56 @@
             class="lc-ebv-input tw-w-14 tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary tw-font-mono"
           />
         </label>
+        {#
+          Per-band magnitude offset for visual separation. Click "Offset" to
+          reveal the centering <select> + vertical +/- micro-stepper. The
+          formula is: Δ_b = −C_b + step × rank_b, where C_b is the chosen
+          statistic of band b's magnitudes and rank_b follows the frequency
+          ordering u<g<r<i<z<Y. Δ_b is rounded to 1 decimal mag and shown
+          in the legend per band; in Flux mode it becomes a multiplicative
+          10^(−Δ_b/2.5) factor with errors scaled to preserve SNR.
+          Per-(survey, band) — same band on different surveys can have
+          different centering values. Detection points feed the centering;
+          FP and overlays inherit the same Δ_b. Periodogram and CSV stay
+          on raw values.
+        #}
+        <button
+          type="button"
+          class="lc-offset-toggle tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-secondary tw-text-text-muted hover:tw-bg-bg-tertiary"
+          data-target="lc-canvas-{{ oid }}"
+          data-lc-offset="off"
+          data-lc-step="0.5"
+          title="Toggle per-band magnitude offset for visual separation. When on: each band's magnitudes are subtracted by their min/median/mean/max, then spread by step × frequency rank (u<g<r<i<z<Y)."
+        >Offset</button>
+        <span
+          class="lc-offset-wrap tw-inline-flex tw-items-center tw-gap-1 tw-hidden"
+          data-target="lc-canvas-{{ oid }}"
+        >
+          <select
+            class="lc-offset-center tw-px-1 tw-py-0 tw-text-[11px] tw-bg-bg-secondary tw-border tw-border-border tw-rounded tw-text-text-primary"
+            data-target="lc-canvas-{{ oid }}"
+            title="Centering statistic — each band's magnitudes are subtracted by this value before spreading."
+          >
+            <option value="min">min</option>
+            <option value="median">median</option>
+            <option value="mean">mean</option>
+            <option value="max">max</option>
+          </select>
+          <span class="tw-inline-flex tw-flex-col tw-leading-none">
+            <button
+              type="button"
+              class="lc-offset-step-up tw-px-1 tw-py-0 tw-text-[10px] tw-border tw-border-border tw-rounded-t tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+              data-target="lc-canvas-{{ oid }}"
+              title="Increase per-rank spread by 0.1 mag (current: 0.5)."
+            >^</button>
+            <button
+              type="button"
+              class="lc-offset-step-dn tw-px-1 tw-py-0 tw-text-[10px] tw-border tw-border-t-0 tw-border-border tw-rounded-b tw-bg-bg-secondary tw-text-text-primary hover:tw-bg-bg-tertiary"
+              data-target="lc-canvas-{{ oid }}"
+              title="Decrease per-rank spread by 0.1 mag (current: 0.5)."
+            >v</button>
+          </span>
+        </span>
         {#
           ZTF DR overlay — always rendered (shown for every survey when
           ra/dec are known) but hidden initially because the synchronous
