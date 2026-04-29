@@ -29,19 +29,22 @@
     whether `#object-detail` (this element) is in the DOM.
   #}
   {#
-    Each side panel carries `aspect-ratio: 1/1` inline so its height
-    follows its column width — the grid then takes both row heights
-    from the (identical) side-panel widths, and the LC + stamps
-    panels (col-span-2) stretch to match. Result: both rows have the
-    same height, side panels are square. Inline style so a stale
-    Tailwind build can't drop the rule.
+    Row 2's side panels (radar, aladin) carry `aspect-ratio: 1/1` inline
+    so their height follows the column width — the grid takes the row
+    height from those widths, and the stamps panel (col-span-2) stretches
+    to match. Row 1 (basic-info | LC | residuals/period/airmass) does NOT
+    use aspect-ratio: the LC drives row height via its flex-col content
+    (toolbar + status strip + canvas min-h), so the row grows when LC
+    options wrap (Offset stepper, Overlay info, etc.) and the side panels
+    follow via the grid's default `align-items: stretch`. Aspect-ratio on
+    a grid item fixes block-size and prevents stretch — keeping it on
+    row 1 made the side panels stay square while the LC grew taller.
   #}
   {% set side_square = "aspect-ratio: 1 / 1;" %}
   <div class="tw-grid tw-gap-3" style="grid-template-columns: 1fr 1.3fr 1.3fr 1fr;">
     <div
       id="basic-info-slot"
       class="tw-col-span-1 tw-overflow-auto tw-min-h-0"
-      style="{{ side_square }}"
       hx-get="{{ API_URL }}/htmx/object_information?oid={{ oid }}&survey_id={{ survey_id }}"
       hx-trigger="load"
       hx-swap="innerHTML"
@@ -70,7 +73,6 @@
     #}
     <div
       class="tw-col-span-1 tw-min-h-0 tw-min-w-0"
-      style="{{ side_square }}"
     >
       <div
         id="coord-residuals-slot"

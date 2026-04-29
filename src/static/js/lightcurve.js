@@ -32,6 +32,12 @@
   const AB_ZP_NJY = 31.4;
   const LN10_OVER_2P5 = Math.log(10) / 2.5;
 
+  // Faint-end cap for the y-axis in mag mode (mag, not flux). LSST's limiting
+  // magnitude is ~26, and ZTF's is brighter still — anything fainter than this
+  // is dominated by error-bar noise rather than signal. Without this, a single
+  // low-SNR point with a multi-mag error bar can push the axis out to 32+.
+  const MAG_AXIS_FAINT_CAP = 28;
+
   // Per-survey marker shape for *detections*. FP keeps its open-triangle
   // marker across surveys (the "FP-ness" of a point is more important than
   // its survey of origin for pattern recognition); the survey of origin is
@@ -1115,6 +1121,18 @@
               });
               if (isFinite(lo)) scale.min = lo;
               if (isFinite(hi)) scale.max = hi;
+              // In mag mode, clamp the faint edge to MAG_AXIS_FAINT_CAP so a
+              // low-SNR point with a multi-mag error bar can't blow the axis
+              // out to 32+. Skip the cap when every point is already fainter
+              // than the cap (preserves the chart for an edge-case object whose
+              // detections all sit beyond it). The errorBarPlugin paints the
+              // clipped end as an open arrow at the chart edge, matching how
+              // it already handles non-finite caps from negative-flux points.
+              if (ch.$lcMode === "mag"
+                  && isFinite(scale.max) && scale.max > MAG_AXIS_FAINT_CAP
+                  && isFinite(scale.min) && scale.min < MAG_AXIS_FAINT_CAP) {
+                scale.max = MAG_AXIS_FAINT_CAP;
+              }
             },
           },
         },
@@ -1224,6 +1242,14 @@
                   const fill = realHidden ? DIMMED : ds.backgroundColor;
                   const stroke = realHidden ? DIMMED : ds.borderColor;
                   const fontColor = realHidden ? DIMMED : TEXT;
+                  // Parametric-fit overlays (SPM / FLEET / TDE) render as
+                  // dashed lines on the chart, not as point markers — the
+                  // dataset has pointRadius:0 + showLine:true + borderDash.
+                  // Mirror that in the legend with pointStyle:"line" so the
+                  // swatch shows the matching dash pattern instead of an
+                  // empty square (which read as "no marker style" rather
+                  // than "model curve" for overlay rows).
+                  const isOverlay = kind === "overlay";
                   if (!groups.has(survey)) groups.set(survey, new Map());
                   const byKind = groups.get(survey);
                   if (!byKind.has(kind)) byKind.set(kind, []);
@@ -1232,7 +1258,10 @@
                     fillStyle: fill,
                     strokeStyle: stroke,
                     lineWidth: ds.borderWidth || 1,
-                    pointStyle: ds.pointStyle || pointStyleFor(survey),
+                    pointStyle: isOverlay
+                      ? "line"
+                      : (ds.pointStyle || pointStyleFor(survey)),
+                    lineDash: isOverlay ? (ds.borderDash || []) : undefined,
                     // Mirror the dataset's marker rotation into the legend
                     // (ZTF FP triangles render apex-down on the chart, so
                     // their legend swatch must too — otherwise LSST FP and
