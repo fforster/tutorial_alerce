@@ -13,7 +13,7 @@
         <li>Zoom: mouse wheel (or pinch on touch)</li>
         <li>Box-zoom: <span class="mono">Shift</span> + drag</li>
         <li>Pan: <span class="mono">Ctrl</span> + drag</li>
-        <li>Reset zoom: double-click the chart, or the <em>Reset zoom</em> button</li>
+        <li>Reset zoom: double-click the chart</li>
         <li>Select a detection: click a point (the stamps panel auto-dispatches to that detection's survey)</li>
         <li>Inspect a point: hover for survey, value, error, band, MJD</li>
       </ul>
@@ -208,12 +208,6 @@
             <option value="tde" disabled>TDE tail</option>
           </select>
         </label>
-        <button
-          type="button"
-          class="chart-zoom-reset-btn tw-px-1.5 tw-py-0 tw-text-[11px] tw-border tw-border-border tw-rounded tw-bg-bg-card tw-text-text-muted hover:tw-text-text-primary"
-          data-target="lc-canvas-{{ oid }}"
-          title="Reset the light-curve zoom (same as double-clicking the chart)."
-        >Reset zoom</button>
         {#
           Periodogram toggle. Swaps the position-residuals panel with the
           periodogram panel (they share a grid cell). Periodogram panel

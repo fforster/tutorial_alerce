@@ -16,7 +16,11 @@
 #}
 <div
   id="stamps-panel"
-  class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4"
+  {# `tw-h-full` so the panel card stretches to fill its grid cell — keeps
+     the bottom edge aligned with the side panels (radar / aladin) that
+     drive the row height via `aspect-ratio: 1/1`. Without it the card
+     ends just below the 3 square stamps and leaves a small gap below. #}
+  class="tw-h-full tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-4"
   data-oid="{{ oid }}"
   data-survey="{{ survey_id }}"
   {#

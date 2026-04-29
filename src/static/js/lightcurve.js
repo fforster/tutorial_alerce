@@ -637,10 +637,12 @@
     }));
     // DR points are archival science-only photometry; carry no flux (diff),
     // so projectPoint filters them out in Diff mode automatically. Rendered
-    // as tiny 10%-alpha markers in the band color, taking the survey's
-    // detection shape (DR is ZTF-only today, so this is a square in
-    // practice), and with a negative draw-order so det + FP always sit on
-    // top of a dense DR crossmatch.
+    // as small *open* squares in the band color so they're visually
+    // distinct from both detections (filled survey shape) and forced
+    // photometry (open triangles); the alpha modulates the border
+    // opacity so the user can tone the DR cloud up/down without
+    // re-fetching. A negative draw-order keeps det + FP on top of a
+    // dense DR crossmatch.
     const alpha = (typeof drAlpha === "number" && isFinite(drAlpha)) ? drAlpha : 0.10;
     const dr = (drBands || []).map((b) => {
       const base = BAND_COLORS[b.name] || BAND_COLORS.unknown;
@@ -649,13 +651,16 @@
         $survey: survey,
         $kind: "dr",
         data: project(b),
-        backgroundColor: withAlpha(base, alpha),
+        // Hollow square: transparent fill + alpha-tinted border. The
+        // border alpha lets the user fade the DR overlay via the slider
+        // without touching the marker shape itself.
+        backgroundColor: "transparent",
         borderColor: withAlpha(base, alpha),
         borderWidth: 1,
-        pointStyle: detStyle,
+        pointStyle: "rect",
         showLine: false,
-        pointRadius: 1.5,
-        pointHoverRadius: 3,
+        pointRadius: 2.5,
+        pointHoverRadius: 4,
         // Chart.js sorts datasets ascending by `order`; lower = drawn first
         // = back layer. Det/FP stay at default 0 so any DR points under them
         // get occluded rather than blotting out a real detection.
@@ -921,7 +926,14 @@
                   // expected "1.1e20" form.
                   return value.toExponential(1).replace("e+", "e");
                 }
-                return value;
+                // Mid-range path: Chart.js's default formatter passes the
+                // raw float to Intl.NumberFormat, which faithfully prints
+                // IEEE-754 binary noise (e.g. an Abs-mag tick computed as
+                // -19.400000000000006 renders as "-19.4000000000006").
+                // Round to 7 sig figs and Number() back to drop the
+                // trailing zeros — yields "-19.4" / "20.5" / "1000" for
+                // the values we actually plot.
+                return Number(value.toPrecision(7)).toString();
               },
             },
             // Chart.js auto-fits the y-axis to point `y` values only, which
