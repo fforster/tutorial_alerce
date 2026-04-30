@@ -311,19 +311,43 @@
     falls back to its empty-hint default, and every filter (form + URL +
     JS state) gets wiped without us having to touch each input by hand.
   #}
+  {#
+    Search button morphs into a spinner + "Searching…" while its request is
+    in flight. htmx adds `.htmx-request` to the requesting element itself, so
+    a tiny inline rule swaps the two child spans without needing extra JS.
+    `hx-disabled-elt="this"` blocks double-clicks during the round-trip.
+    `#results-loading` (overlay over the results card) lights up in parallel.
+  #}
+  <style>
+    #search-btn .search-btn-loading { display: none; }
+    #search-btn.htmx-request .search-btn-idle { display: none; }
+    #search-btn.htmx-request .search-btn-loading { display: inline-flex; }
+    #search-btn.htmx-request { cursor: progress; opacity: 0.85; }
+  </style>
   <div class="tw-flex tw-gap-2 tw-mt-1">
     <button
       type="button"
-      class="tw-flex-1 tw-bg-accent tw-text-bg-primary tw-text-base tw-font-semibold tw-py-3 tw-rounded hover:tw-bg-accent-hover tw-flex tw-items-center tw-justify-center tw-gap-2"
+      id="search-btn"
+      class="tw-flex-1 tw-bg-accent tw-text-bg-primary tw-text-base tw-font-semibold tw-py-3 tw-rounded hover:tw-bg-accent-hover tw-flex tw-items-center tw-justify-center tw-gap-2 disabled:tw-cursor-progress"
       hx-get="{{ API_URL }}/htmx/list_objects"
       hx-trigger="click"
       hx-target="#results-slot"
       hx-swap="innerHTML"
       hx-indicator="#results-loading"
+      hx-disabled-elt="this"
       hx-vals='js:{...send_form_Data()}'
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      Search
+      <span class="search-btn-idle tw-inline-flex tw-items-center tw-gap-2">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Search
+      </span>
+      <span class="search-btn-loading tw-items-center tw-gap-2">
+        <svg class="tw-animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke-opacity="0.25"/>
+          <path d="M21 12a9 9 0 0 0-9-9" stroke-linecap="round"/>
+        </svg>
+        Searching…
+      </span>
     </button>
     <a
       href="/?survey={{ survey }}"

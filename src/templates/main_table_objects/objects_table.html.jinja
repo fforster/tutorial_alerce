@@ -36,7 +36,7 @@
 </style>
 <div
   id="objects_table"
-  class="tw-bg-bg-card tw-border tw-border-border tw-rounded"
+  class="tw-bg-bg-card tw-border tw-border-border tw-rounded tw-relative"
   data-nav='{{ {
     "oids": objects_list["items"] | map(attribute="oid") | list,
     "current_page": objects_list["current_page"],
@@ -49,7 +49,29 @@
   } | tojson_compact }}'
 >
 
-  <div id="results-loading" class="htmx-indicator tw-h-1 tw-bg-accent tw-animate-pulse"></div>
+  {#
+    Loading overlay — covers the results card with a translucent backdrop and
+    a centered spinner+label whenever its `.htmx-request` flag is set (Search
+    button, pagination, row-click drill-in). `.htmx-indicator-scoped` only
+    reacts when htmx puts the class on the indicator element itself, so
+    unrelated requests targeting `#results-slot` don't flash this on. Shows
+    on top of the existing rows so the previous results are still visible
+    underneath but unmistakably "in transition".
+  #}
+  <div
+    id="results-loading"
+    class="htmx-indicator-scoped tw-absolute tw-inset-0 tw-z-10 tw-flex tw-items-center tw-justify-center tw-bg-bg-card/85 tw-rounded tw-pointer-events-none"
+    role="status"
+    aria-live="polite"
+  >
+    <div class="tw-flex tw-items-center tw-gap-3 tw-text-accent tw-text-sm tw-font-medium tw-bg-bg-tertiary tw-border tw-border-border tw-rounded tw-px-4 tw-py-2 tw-shadow-lg">
+      <svg class="tw-animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke-opacity="0.25"/>
+        <path d="M21 12a9 9 0 0 0-9-9" stroke-linecap="round"/>
+      </svg>
+      <span>Searching…</span>
+    </div>
+  </div>
 
   {% if objects_list['items']|length > 0 %}
     <div class="tw-overflow-x-auto">
