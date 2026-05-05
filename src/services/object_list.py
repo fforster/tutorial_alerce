@@ -3,6 +3,7 @@ the template context used by main_table_objects/objects_table.html.jinja.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import alerce_client
@@ -100,7 +101,13 @@ def build_search_params(
         p["dec"] = dec
         p["radius"] = radius if radius is not None else 30.0
     if oid:
-        p["oid"] = oid
+        # Split on commas/whitespace so a free-text list like
+        # "ZTF26aaumzmq, ZTF22abqqckk" becomes repeated `oid=` query params
+        # (the upstream filter is `oid: list[str]`). Mirrors the prototype's
+        # `oidRaw.split(/[\s,]+/)` at alerce_explorer.html:2141.
+        oids = [s for s in re.split(r"[\s,]+", oid) if s]
+        if oids:
+            p["oid"] = oids if len(oids) > 1 else oids[0]
     return p
 
 
