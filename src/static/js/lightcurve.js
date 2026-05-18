@@ -298,10 +298,20 @@
   // so unix-seconds = (mjd - 40587) * 86400. Truncates to whole-second
   // precision so the tooltip stays compact ("YYYY-MM-DD HH:MM:SS UTC").
   // Non-finite / pre-1858 inputs return an empty string.
+  //
+  // `survey` selects the source time scale: LSST alerts carry
+  // `midpointMjdTai` (atomic time, currently UTC + 37 s) so we must subtract
+  // the offset before treating the seconds as a UTC instant. ZTF MJDs are
+  // already UTC. See community.lsst.org thread "Question about
+  // midpointMjdTai to UTC conversion in recent Rubin alerts" — multiple
+  // brokers initially shipped the unconverted TAI string.
   const MJD_UNIX_EPOCH = 40587;
-  function mjdToUtcString(mjd) {
+  const TAI_MINUS_UTC_SECONDS = 37; // since 2017-01-01; bump on next leap second
+  function mjdToUtcString(mjd, survey) {
     if (!isFinite(mjd)) return "";
-    const ms = (mjd - MJD_UNIX_EPOCH) * 86400 * 1000;
+    let seconds = (mjd - MJD_UNIX_EPOCH) * 86400;
+    if (survey === "lsst") seconds -= TAI_MINUS_UTC_SECONDS;
+    const ms = seconds * 1000;
     if (!isFinite(ms)) return "";
     const d = new Date(ms);
     const iso = d.toISOString(); // "YYYY-MM-DDTHH:MM:SS.sssZ"
@@ -1341,7 +1351,7 @@
                 // phase back to a calendar epoch).
                 const folded = chart.$lcFold === "fold" && chart.$lcPeriod > 0;
                 const mjd = isFinite(p.mjd) ? p.mjd : p.x;
-                const utc = mjdToUtcString(mjd);
+                const utc = mjdToUtcString(mjd, ctx.dataset.$survey);
                 const utcSuffix = utc ? ` (${utc})` : "";
                 const xLabel = folded
                   ? `phase ${p.x.toFixed(3)} · MJD ${mjd.toFixed(3)}${utcSuffix}`

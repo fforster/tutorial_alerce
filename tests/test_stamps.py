@@ -136,6 +136,33 @@ def test_picker_utc_is_blank_for_missing_mjd():
     assert _mjd_to_utc("not-a-number") == ""
 
 
+def test_mjd_to_utc_subtracts_tai_offset_for_lsst():
+    """LSST MJDs are `midpointMjdTai` (atomic time, currently UTC + 37 s).
+    A naive (mjd - 40587) * 86400 conversion would label TAI as UTC and
+    miss the calendar second by 37 s. The `scale="tai"` path subtracts the
+    offset; `scale="utc"` (default, used for ZTF) leaves the value alone."""
+    from src.services.stamps import _mjd_to_utc
+    # MJD 60000.0 corresponds to 2023-02-25 00:00:00 in whatever scale it's
+    # in. As UTC it stays 00:00:00; as TAI it lands 37 s earlier in UTC,
+    # i.e. 2023-02-24 23:59:23 UTC.
+    assert _mjd_to_utc(60000.0, "utc") == "2023-02-25 00:00:00 UTC"
+    assert _mjd_to_utc(60000.0, "tai") == "2023-02-24 23:59:23 UTC"
+
+
+def test_picker_uses_tai_offset_for_lsst_via_survey_config():
+    """End-to-end: shape_stamps_context should consult SURVEY_CONFIG and
+    apply the TAI offset for LSST without the caller having to know."""
+    raw = {
+        "detections": [
+            {"measurement_id": "1", "mjd": 60000.0, "has_stamp": True, "band": "g",
+             "band_map": {"g": "g"}},
+        ]
+    }
+    ctx = shape_stamps_context(raw, survey="lsst", oid="L1", identifier=None)
+    row = ctx["detections"][0]
+    assert row["mjd_utc"] == "2023-02-24 23:59:23 UTC"
+
+
 def test_stamp_url_templates_by_survey_carry_oid_and_ident_placeholders():
     """Per-survey templates feed cross-survey clicks (a ZTF point on an
     LSST view, or vice versa). Both __OID__ and __IDENT__ are placeholders

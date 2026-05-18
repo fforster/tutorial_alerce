@@ -120,7 +120,9 @@ src/
     htmx.py               HTMLResponse endpoints (Jinja2 fragments)
     rest.py               JSON endpoints for client-side features
   services/
-    survey_config.py      SC() dispatch + per-survey field remapping + extinction_r
+    survey_config.py      SC() dispatch + per-survey field remapping + extinction_r;
+                          mjd_scale ("tai"/"utc") + TAI_MINUS_UTC_SECONDS = 37
+                          for LSST midpointMjdTai → UTC conversion
     normalize.py          Raw detection → common schema (ZTF mag→nJy)
     safe_json.py          64-bit-OID-safe JSON parsing for LSST
     alerce_client.py      httpx client for the public ALeRCE API
@@ -137,7 +139,8 @@ src/
     crossmatch.py         catsHTM crossmatch fetch + per-catalog row shaping
     stamps.py             stamp picker context + per-survey URL templates
                           (stamp_url_templates_by_survey carries __OID__ + __IDENT__
-                          placeholders so cross-survey clicks dispatch correctly)
+                          placeholders so cross-survey clicks dispatch correctly);
+                          _mjd_to_utc(mjd, scale) applies the TAI offset for LSST
     ztf_dr.py             ZTF DR archival cone-search
     features.py           Feature-table fetch + pick_default_version (strict N.N.N picker,
                           shared with LC fold-period extractor)
@@ -168,7 +171,8 @@ src/
                           (LSST=circle, ZTF=square; ZTF FP=apex-down triangle) +
                           (survey, kind, label) visibility memory across toggles +
                           lcSetCrossSurvey / lcSetBundle / lcSetFeatures / lcSetCoords
-                          + lc:dataChanged & lc:visibilityChanged custom events
+                          + lc:dataChanged & lc:visibilityChanged custom events;
+                          mjdToUtcString(mjd, survey) subtracts TAI−UTC for LSST
     js/stamps.js          FITS + WCS + asinh stretch for LSST stamps;
                           updateStampsForIdentifier(ident, survey, oid) fills
                           __OID__ + __IDENT__ placeholders in per-survey templates

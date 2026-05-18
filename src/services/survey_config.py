@@ -42,6 +42,13 @@ class SurveyConfig:
     features_url_template: str | None = None
     extinction_r: dict[str, float] = field(default_factory=dict)
     extra_params: Callable[[dict[str, object]], dict[str, object]] = lambda p: p
+    # Time scale of MJDs returned by this survey's API. LSST alerts carry
+    # `midpointMjdTai` (atomic time, currently UTC + 37 s); ZTF MJDs are UTC.
+    # Used by mjd→calendar-date conversion so the UI doesn't show TAI as UTC
+    # (see community.lsst.org thread "Question about midpointMjdTai to UTC
+    # conversion in recent Rubin alerts" — multiple brokers initially shipped
+    # the unconverted TAI string).
+    mjd_scale: str = "utc"
 
     def classifiers_url(self) -> str:
         return self.api_base + self.classifiers_path
@@ -73,6 +80,12 @@ class SurveyConfig:
         if not self.features_url_template:
             return None
         return self.features_url_template.format(oid=oid)
+
+
+# Current TAI − UTC offset in seconds. Constant since 2017-01-01 (most recent
+# leap second); next change will be announced by IERS. Bumping this is the
+# only edit needed when a new leap second is introduced.
+TAI_MINUS_UTC_SECONDS = 37
 
 
 def _ztf_extra_params(params: dict[str, object]) -> dict[str, object]:
@@ -140,6 +153,7 @@ SURVEY_CONFIG: dict[str, SurveyConfig] = {
             "i": 1.684, "z": 1.323, "y": 1.088,
         },
         extra_params=_lsst_extra_params,
+        mjd_scale="tai",
     ),
     "ztf": SurveyConfig(
         name="ztf",

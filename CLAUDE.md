@@ -134,6 +134,11 @@ These are the traps — read the referenced sections in `../ALeRCE_explorer/CLAU
     - **Position residuals derive from the live LC** (`coord_residuals.js` walks `$lcRaw` + `$lcXRaw`, filters by LC dataset visibility, re-renders on `lc:dataChanged` / `lc:visibilityChanged` custom events fired from `applyModes` and the legend `onClick`). The endpoint is now a shell renderer; `shape_coord_residuals` stays for programmatic use.
     - **Periodogram inputs** are gated the same way: `getDetDataByBand` reads from both `$lcRaw` and `$lcXRaw`, skips bands hidden via the LC legend, and the status line lists the bands actually consumed (`LSST: g r · ZTF: g`).
     - **CSV export** carries `survey`, `oid`, `candid` columns plus cross-survey rows; `oid` and `candid` are double-quoted so 64-bit LSST ids stay string-typed in pandas/Excel.
+13. **MJD time scale is per-survey** — LSST alerts carry `midpointMjdTai` (atomic time); ZTF MJDs are UTC. Any conversion to a calendar string must subtract the current TAI − UTC offset for LSST, or it will mislabel TAI as UTC and be 37 s off (current as of 2017-01-01; bump on the next leap second). Multiple brokers initially shipped this bug — see [community.lsst.org "Question about midpointMjdTai to UTC conversion in recent Rubin alerts"](https://community.lsst.org/t/question-about-midpointmjdtai-to-utc-conversion-in-recent-rubin-alerts/11976). The scale lives on `SurveyConfig.mjd_scale` (`"tai"` / `"utc"`) and the constant on `services/survey_config.py::TAI_MINUS_UTC_SECONDS`. Two converters consume it:
+    - `services/stamps.py::_mjd_to_utc(mjd, scale)` — stamps picker dropdown (`"MJD … (YYYY-MM-DD HH:MM:SS UTC) · band"`).
+    - `static/js/lightcurve.js::mjdToUtcString(mjd, survey)` — LC tooltip; picks the scale from `ctx.dataset.$survey`.
+    - **Not** applied to the search form's `firstmjd_min/max` (`coords.js::smartDateToMJD`): the filter is calendar-day granularity, so the 37 s offset is below user-visible precision. Raw MJD displays (basic-info first/last MJD, LC X-axis ticks) stay unconverted on purpose — they're labeled "MJD", not "UTC".
+    - The two TAI offset constants (Python + JS) must move together on the next leap second; grep for `TAI_MINUS_UTC_SECONDS`.
 
 ## External services the port depends on
 

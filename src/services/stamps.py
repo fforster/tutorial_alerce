@@ -15,7 +15,7 @@ import math
 from typing import Any
 
 from . import alerce_client
-from .survey_config import SC
+from .survey_config import SC, TAI_MINUS_UTC_SECONDS
 
 STAMP_TYPES: tuple[str, ...] = ("science", "template", "difference")
 
@@ -26,7 +26,14 @@ STAMP_TYPES: tuple[str, ...] = ("science", "template", "difference")
 _MJD_UNIX_EPOCH = 40587
 
 
-def _mjd_to_utc(mjd: Any) -> str:
+def _mjd_to_utc(mjd: Any, scale: str = "utc") -> str:
+    """Format an MJD as a UTC calendar string.
+
+    `scale` is the time scale the MJD itself is in: "utc" (ZTF) leaves it
+    alone, "tai" (LSST `midpointMjdTai`) subtracts the current TAI−UTC
+    offset before converting. Treating TAI as UTC is the bug reported in
+    the Rubin community forum thread referenced in survey_config.py.
+    """
     if mjd is None:
         return ""
     try:
@@ -36,6 +43,8 @@ def _mjd_to_utc(mjd: Any) -> str:
     if not math.isfinite(m):
         return ""
     seconds = (m - _MJD_UNIX_EPOCH) * 86400.0
+    if scale == "tai":
+        seconds -= TAI_MINUS_UTC_SECONDS
     try:
         dt = datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
     except (OverflowError, OSError, ValueError):
@@ -68,6 +77,7 @@ def shape_stamps_context(
     identifier: str | None,
 ) -> dict[str, Any]:
     dets = raw_lc.get("detections") or []
+    scale = SC(survey).mjd_scale
     picker: list[dict[str, Any]] = []
     for d in dets:
         ident = _identifier(d, survey)
@@ -82,7 +92,7 @@ def shape_stamps_context(
                 "mjd": mjd,
                 # Pre-formatted UTC string for the dropdown label so the
                 # template doesn't need a Jinja filter or per-row maths.
-                "mjd_utc": _mjd_to_utc(mjd),
+                "mjd_utc": _mjd_to_utc(mjd, scale),
                 "band": _band_letter(d, survey),
             }
         )
