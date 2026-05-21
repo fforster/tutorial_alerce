@@ -1,4 +1,4 @@
-# Tutorial ALeRCE Explorer (htmx)
+# ALeRCE Explorer (experimental, htmx)
 
 Re-implementation of the ALeRCE Explorer using htmx + FastAPI + Jinja2 + Tailwind,
 mirroring the patterns used in the production

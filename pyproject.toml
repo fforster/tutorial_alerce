@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "tutorial-alerce"
+name = "alerce-explorer-experimental"
 version = "0.1.0"
 description = "htmx-based reimplementation of the ALeRCE Explorer (tutorial)"
 authors = ["Francisco Förster <francisco.forster@gmail.com>"]
