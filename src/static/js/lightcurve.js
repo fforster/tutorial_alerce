@@ -702,7 +702,14 @@
       const base = BAND_COLORS[b.name] || BAND_COLORS.unknown;
       return {
         label: `${b.name} (DR)`,
-        $survey: survey,
+        // ZTF DR is always sourced from the ZTF data release, even on LSST
+        // detail views (where the DR cone-search is the only path to a
+        // pre-LSST archival history). Tagging $survey: "ztf" fixes the
+        // legend header ("ZTF DR:" instead of "LSST DR:"), routes the
+        // tooltip MJD→UTC through the ZTF (UTC) scale rather than LSST
+        // (TAI), and keeps point styling consistent with the rest of the
+        // ZTF series.
+        $survey: "ztf",
         $kind: "dr",
         $band: b.name,
         data: project(b),
@@ -1960,9 +1967,18 @@
     // Only export ZTF DR when the user has it turned on — otherwise they'd
     // get archival points they never asked for, and in Diff mode those
     // points would silently drop (DR has no difference flux) making the
-    // file subtly inconsistent with the plot. DR shares the primary oid
-    // (it's archival photometry of the same object).
-    if (chart.$lcDrShown) emit("ztf_dr", survey, oid, chart.$lcDrBands);
+    // file subtly inconsistent with the plot.
+    //
+    // DR rows are tagged survey="ztf" because the data always comes from
+    // the ZTF data release, even on LSST detail views. The oid column
+    // uses the primary oid when the active survey is ZTF (same object),
+    // or the cross-survey ZTF oid when in LSST mode if one was matched;
+    // otherwise empty — there's no ZTF oid to attribute the archival
+    // points to.
+    if (chart.$lcDrShown) {
+      const drOid = survey === "ztf" ? oid : (chart.$lcXOid || "");
+      emit("ztf_dr", "ztf", drOid, chart.$lcDrBands);
+    }
     // Cross-survey rows (matched counterpart from the other telescope) ride
     // along when present so the file mirrors what the chart shows. The
     // per-row `survey` + `oid` columns distinguish them from the primary.
