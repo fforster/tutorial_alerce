@@ -11,14 +11,32 @@
   `side` = "left" (default) or "right" anchors the tooltip's horizontal edge —
   right-edge panels use "right" so the card doesn't overflow the viewport.
 #}
+{#
+  Why position:fixed instead of position:absolute?
+
+  The detail-view grid rows (`detail-row-1`, `detail-row-2`) use
+  `overflow:hidden` so the row-resize handle can shrink them without
+  bleeding into the other row. That clips every descendant — including
+  absolutely-positioned tooltips. With `position:absolute`, only the
+  panels whose slots themselves have `overflow:auto` (Basic Information)
+  let the user reach the tooltip's bottom; every other panel's tooltip
+  was silently clipped, scrollbar and all.
+
+  `position:fixed` escapes every overflow ancestor by being positioned
+  relative to the viewport — but viewport-relative also means we have
+  to compute `top`/`left` ourselves on each show. A small inline script
+  reads the trigger's `getBoundingClientRect()` and updates the tooltip
+  before fade-in. `group-hover`/`group-focus-within` still drive
+  visibility, so keyboard focus and pointer hover both work.
+#}
 {% macro panel_help(title, side="left") %}
-<div class="tw-relative tw-group">
+<div class="tw-relative tw-group panel-help" data-tooltip-side="{{ side }}">
   <div class="tw-text-text-secondary tw-text-xs tw-uppercase tw-cursor-help tw-underline tw-decoration-dotted tw-underline-offset-2" tabindex="0">
     {{ title }} <span class="tw-text-text-muted tw-normal-case">(?)</span>
   </div>
   <div
     role="tooltip"
-    class="tw-hidden group-hover:tw-block group-focus-within:tw-block tw-absolute tw-z-50 tw-top-full {% if side == 'right' %}tw-right-0{% else %}tw-left-0{% endif %} tw-mt-2 tw-w-80 tw-max-w-[calc(100vw-2rem)] tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-3 tw-text-xs tw-text-text-primary tw-normal-case tw-shadow-lg tw-leading-relaxed"
+    class="tw-hidden group-hover:tw-block group-focus-within:tw-block tw-fixed tw-z-50 tw-w-80 tw-max-w-[calc(100vw-2rem)] tw-max-h-[80vh] tw-overflow-y-auto tw-bg-bg-card tw-border tw-border-border tw-rounded tw-p-3 tw-text-xs tw-text-text-primary tw-normal-case tw-shadow-lg tw-leading-relaxed"
   >
     {{ caller() }}
   </div>

@@ -1329,6 +1329,52 @@ def test_api_ztf_dr_validates_inputs(client):
     assert r.status_code == 422
 
 
+def test_api_lsst_neighbors_proxies_service(client, monkeypatch):
+    captured = {}
+
+    async def fake_neighbors(*, ra, dec, lastmjd, exclude_oid):
+        captured.update(ra=ra, dec=dec, lastmjd=lastmjd, exclude_oid=exclude_oid)
+        return [
+            {"oid": "111", "ra": ra + 0.01, "dec": dec + 0.01, "lastmjd": lastmjd},
+            {"oid": "222", "ra": ra - 0.01, "dec": dec - 0.01, "lastmjd": lastmjd + 0.01},
+        ]
+
+    monkeypatch.setattr(
+        "src.routes.rest.lsst_neighbors_service.get_lsst_neighbors",
+        fake_neighbors,
+    )
+    r = client.get(
+        "/api/lsst_neighbors?ra=180.0&dec=-30.0&lastmjd=60000.0&exclude_oid=999"
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert [row["oid"] for row in body] == ["111", "222"]
+    assert captured == {
+        "ra": 180.0, "dec": -30.0, "lastmjd": 60000.0, "exclude_oid": "999",
+    }
+
+
+def test_api_lsst_neighbors_upstream_error_is_502(client, monkeypatch):
+    async def fake_neighbors(*, ra, dec, lastmjd, exclude_oid):
+        raise RuntimeError("lsst down")
+
+    monkeypatch.setattr(
+        "src.routes.rest.lsst_neighbors_service.get_lsst_neighbors",
+        fake_neighbors,
+    )
+    r = client.get("/api/lsst_neighbors?ra=180.0&dec=-30.0&lastmjd=60000.0")
+    assert r.status_code == 502
+
+
+def test_api_lsst_neighbors_validates_inputs(client):
+    # dec out of range
+    r = client.get("/api/lsst_neighbors?ra=10.0&dec=100.0&lastmjd=60000.0")
+    assert r.status_code == 422
+    # lastmjd must be positive
+    r = client.get("/api/lsst_neighbors?ra=10.0&dec=-5.0&lastmjd=0")
+    assert r.status_code == 422
+
+
 def test_object_information_upstream_error_renders_message(client, monkeypatch):
     async def fake_info(*, survey, oid):
         raise RuntimeError("timeout")
@@ -1546,7 +1592,11 @@ def test_detail_includes_avro_modal_slot(client, monkeypatch):
 
 def test_aladin_renders_host_with_coordinates(client, monkeypatch):
     async def fake_info(*, survey, oid):
-        return {"oid": oid, "survey": survey, "ra": 180.125, "dec": -30.25}
+        return {
+            "oid": oid, "survey": survey,
+            "ra": 180.125, "dec": -30.25,
+            "lastmjd": 60123.456,
+        }
 
     monkeypatch.setattr(
         "src.routes.htmx.object_info_service.get_object_info",
@@ -1559,6 +1609,9 @@ def test_aladin_renders_host_with_coordinates(client, monkeypatch):
     assert 'data-ra="180.125"' in r.text
     assert 'data-dec="-30.25"' in r.text
     assert 'data-oid="ZTF21abc"' in r.text
+    # lastmjd is stamped on the host so JS can query LSST neighbours
+    # within ±2 hr of the last detection.
+    assert 'data-lastmjd="60123.456"' in r.text
 
 
 def test_aladin_without_coordinates_shows_message(client, monkeypatch):

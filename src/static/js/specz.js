@@ -188,7 +188,14 @@
   // Public entry point. aladin.js calls this after the main-object marker
   // is added; each catalog fires independently and `onLoad` is invoked when
   // a catalog finishes with at least one source (used for the legend chips).
+  // Returns a Promise that resolves once every catalog has settled (resolved
+  // or rejected) so callers that need to chain follow-on work can `await` it.
+  // The current aladin.js does NOT await — it fires the LSST-neighbours
+  // overlay in parallel so a slow VizieR endpoint can't delay the gray
+  // squares the user came here to see.
   window.loadSpecZOverlays = function (aladin, ra, dec, onLoad) {
-    SPEC_Z_CATALOGS.forEach((cfg) => loadCatalog(aladin, cfg, ra, dec, onLoad));
+    return Promise.allSettled(
+      SPEC_Z_CATALOGS.map((cfg) => loadCatalog(aladin, cfg, ra, dec, onLoad)),
+    );
   };
 })();

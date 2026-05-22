@@ -19,7 +19,9 @@
         <li>Imagery / overlay picker: toolbar at top-right of the viewer</li>
       </ul>
       <div class="tw-font-semibold tw-mb-1">Host-galaxy spec-z</div>
-      <p class="tw-text-text-secondary">Coloured chips mark VizieR catalog sources (DESI DR1, SDSS DR16, 6dFGS, GAMA, 2MRS, WiggleZ, zCOSMOS, VIPERS PDR2, OzDES DR1). Click a chip to populate the <em>z</em> input in the light-curve panel — useful for absolute-magnitude mode.</p>
+      <p class="tw-text-text-secondary tw-mb-3">Coloured chips mark VizieR catalog sources (DESI DR1, SDSS DR16, 6dFGS, GAMA, 2MRS, WiggleZ, zCOSMOS, VIPERS PDR2, OzDES DR1). Click a chip to populate the <em>z</em> input in the light-curve panel — useful for absolute-magnitude mode.</p>
+      <div class="tw-font-semibold tw-mb-1">Contemporaneous LSST objects</div>
+      <p class="tw-text-text-secondary">Gray squares mark LSST objects whose mean position lies within 10 arcmin of this object AND whose <em>lastmjd</em> falls within ±2 hr of this object's. Useful for spotting possible trails (asteroids / satellites) that share the same exposure — a near-perfect chain of squares along the same direction is a strong hint. The count is shown on the "LSST neighbours (N)" chip in the legend. Click a square to see its <em>oid</em> and <em>lastmjd</em>.</p>
     {% endcall %}
     <div id="aladin-legend-{{ oid }}" class="tw-text-xs tw-text-text-muted tw-font-mono"></div>
   </div>
@@ -37,6 +39,7 @@
       data-dec="{{ dec }}"
       data-oid="{{ oid }}"
       data-legend-id="aladin-legend-{{ oid }}"
+      {% if lastmjd is not none %}data-lastmjd="{{ lastmjd }}"{% endif %}
     >
       <div class="aladin-loading tw-absolute tw-inset-0 tw-flex tw-items-center tw-justify-center tw-text-xs tw-text-text-muted">
         loading sky view…

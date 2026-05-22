@@ -124,6 +124,7 @@
     const ra = parseFloat(host.dataset.ra);
     const dec = parseFloat(host.dataset.dec);
     const oid = host.dataset.oid || "";
+    const lastmjd = parseFloat(host.dataset.lastmjd);
     const legendEl = document.getElementById(host.dataset.legendId || "");
     const loadingEl = host.querySelector(".aladin-loading");
     if (!isFinite(ra) || !isFinite(dec)) return;
@@ -178,17 +179,70 @@
         input.dispatchEvent(new Event("change", { bubbles: true }));
       });
 
+      // Spec-z and LSST-neighbour queries fire concurrently: spec-z catalogs
+      // have a 20s per-request timeout and one slow VizieR endpoint can
+      // delay the whole batch — we don't want that to also push back the
+      // LSST gray-squares overlay (which the user cares about most for
+      // trail-spotting). Each overlay manages its own legend chip + Aladin
+      // layer, so they can interleave safely.
       if (typeof window.loadSpecZOverlays === "function") {
         window.loadSpecZOverlays(aladin, ra, dec, (info) => {
           addLegendChip(legendEl, `${info.name} (${info.count})`, info.color);
         });
       }
+      loadLsstNeighbors(aladin, ra, dec, lastmjd, oid, legendEl);
     } catch (e) {
       console.error("Aladin init failed:", e);
       if (loadingEl) {
         loadingEl.textContent = `Aladin unavailable: ${e.message || e}`;
       }
     }
+  }
+
+  // Server-side cone-search for LSST objects within 10 arcmin and ±2 hr of
+  // the current object's last detection — drawn as gray squares so the user
+  // can spot contemporaneous detections that hint at a satellite/asteroid
+  // trail. We always query LSST regardless of the detail-view survey: the
+  // question is "what LSST sources were active here at this moment". Bailing
+  // out silently if `lastmjd` isn't on the host (object_info didn't expose
+  // it) — the rest of the panel still works.
+  async function loadLsstNeighbors(aladin, ra, dec, lastmjd, oid, legendEl) {
+    if (typeof window.A === "undefined") return;
+    if (!isFinite(lastmjd)) return;
+    const url = `/api/lsst_neighbors?ra=${ra}&dec=${dec}&lastmjd=${lastmjd}`
+              + (oid ? `&exclude_oid=${encodeURIComponent(oid)}` : "");
+    let rows;
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) {
+        console.warn(`lsst_neighbors HTTP ${resp.status}`);
+        return;
+      }
+      rows = await resp.json();
+    } catch (e) {
+      console.warn("lsst_neighbors failed:", e.message);
+      return;
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      addLegendChip(legendEl, "LSST neighbours (0)", "#9ca3af");
+      return;
+    }
+    const color = "#9ca3af";  // gray-400
+    const cat = window.A.catalog({
+      name: `LSST neighbours (${rows.length})`,
+      sourceSize: 12,
+      color,
+      shape: "square",
+      onClick: "showPopup",
+    });
+    aladin.addCatalog(cat);
+    const sources = rows.map((r) => window.A.source(r.ra, r.dec, {
+      name: `LSST ${r.oid}`,
+      oid: r.oid,
+      lastmjd: typeof r.lastmjd === "number" ? r.lastmjd.toFixed(5) : String(r.lastmjd),
+    }));
+    cat.addSources(sources);
+    addLegendChip(legendEl, `LSST neighbours (${rows.length})`, color);
   }
 
   function addLegendChip(legendEl, label, color) {

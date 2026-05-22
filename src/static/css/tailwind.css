@@ -32,4 +32,33 @@
   .htmx-indicator-scoped.htmx-request {
     opacity: 1;
   }
+
+  /* Visible scrollbar for the panel help tooltip cards (and any other
+     element marked `[role="tooltip"]`). Default WebKit/Blink scrollbars
+     are invisible against the dark card background until the user
+     actively scrolls; on macOS they're hidden entirely. We force a
+     persistent thin scrollbar so users can see at a glance that the
+     card has more content below. Firefox's scrollbar-color is the
+     standards-based knob; the ::-webkit-scrollbar pseudo-elements
+     cover Chromium/Safari. */
+  [role="tooltip"] {
+    scrollbar-width: thin;
+    scrollbar-color: #6e7681 #161b22;
+  }
+  [role="tooltip"]::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  [role="tooltip"]::-webkit-scrollbar-track {
+    background: #161b22;
+    border-radius: 4px;
+  }
+  [role="tooltip"]::-webkit-scrollbar-thumb {
+    background-color: #6e7681;
+    border-radius: 4px;
+    border: 2px solid #161b22;
+  }
+  [role="tooltip"]::-webkit-scrollbar-thumb:hover {
+    background-color: #8b949e;
+  }
 }

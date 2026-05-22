@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..services import lsst_neighbors as lsst_neighbors_service
 from ..services import ztf_dr as ztf_dr_service
 
 log = logging.getLogger(__name__)
@@ -35,4 +36,24 @@ async def ztf_dr(
         return await ztf_dr_service.get_ztf_dr(ra=ra, dec=dec, radius=radius)
     except Exception as e:
         log.exception("ztf_dr fetch failed")
+        raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
+
+
+@router.get("/lsst_neighbors")
+async def lsst_neighbors(
+    ra: float = Query(..., ge=0.0, le=360.0),
+    dec: float = Query(..., ge=-90.0, le=90.0),
+    lastmjd: float = Query(..., gt=0.0),
+    exclude_oid: str | None = Query(None),
+) -> list[dict]:
+    """LSST cone-search around (ra, dec) within 10 arcmin AND ±2 hr of
+    `lastmjd`. The Aladin sky-view panel calls this after spec-z catalogs
+    have loaded, then plots the returned objects as gray squares so the user
+    can spot contemporaneous detections (potential trails)."""
+    try:
+        return await lsst_neighbors_service.get_lsst_neighbors(
+            ra=ra, dec=dec, lastmjd=lastmjd, exclude_oid=exclude_oid,
+        )
+    except Exception as e:
+        log.exception("lsst_neighbors fetch failed")
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e

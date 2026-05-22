@@ -701,7 +701,13 @@ async def aladin(request: Request, oid: str, survey_id: str) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "aladin/aladinPreview.html.jinja",
-        {"oid": oid, "survey_id": survey_id, "ra": info.get("ra"), "dec": info.get("dec")},
+        {
+            "oid": oid,
+            "survey_id": survey_id,
+            "ra": info.get("ra"),
+            "dec": info.get("dec"),
+            "lastmjd": info.get("lastmjd"),
+        },
     )
 
 
