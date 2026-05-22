@@ -40,6 +40,35 @@ def _maybe_int(v: Any) -> int | None:
         return None
 
 
+def _format_delta_mjd_human(delta_days: float | None) -> str | None:
+    """Format a duration in days as 'XX yr XX d XX h XX m XX.XX s' (Julian year = 365.25 d).
+
+    Leading zero units are dropped so '0 yr 0 d 1 h 2 m 3.00 s' renders as '1 h 2 m 3.00 s';
+    the seconds field is always kept so the all-zero case shows '0.00 s'.
+    """
+    if delta_days is None:
+        return None
+    sign = "-" if delta_days < 0 else ""
+    total_seconds = abs(delta_days) * 86400.0
+    year_seconds = 365.25 * 86400.0
+    years = int(total_seconds // year_seconds)
+    remainder = total_seconds - years * year_seconds
+    days = int(remainder // 86400.0)
+    remainder -= days * 86400.0
+    hours = int(remainder // 3600.0)
+    remainder -= hours * 3600.0
+    minutes = int(remainder // 60.0)
+    seconds = remainder - minutes * 60.0
+    parts: list[str] = []
+    started = False
+    for value, unit in ((years, "yr"), (days, "d"), (hours, "h"), (minutes, "m")):
+        if started or value > 0:
+            parts.append(f"{value} {unit}")
+            started = True
+    parts.append(f"{seconds:.2f} s")
+    return sign + " ".join(parts)
+
+
 def shape_object_info(raw: dict[str, Any], *, survey: str) -> dict[str, Any]:
     oid = str(raw.get("oid")) if raw.get("oid") is not None else None
     ra = _maybe_float(raw.get("meanra"))
@@ -98,6 +127,7 @@ def shape_object_info(raw: dict[str, Any], *, survey: str) -> dict[str, Any]:
         "firstmjd": firstmjd,
         "lastmjd": lastmjd,
         "delta_mjd": delta,
+        "delta_mjd_human": _format_delta_mjd_human(delta),
         "n_det": n_det,
         "n_non_det": n_non_det,
         "n_forced": n_forced,

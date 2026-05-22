@@ -74,6 +74,41 @@ def test_delta_mjd_prefers_explicit_field():
     assert info["delta_mjd"] == 42.0
 
 
+def test_delta_mjd_human_breaks_into_yr_d_h_m_s():
+    # 365.25 d + 1 d + 1 h + 1 m + 1 s = 1 yr 1 d 1 h 1 m 1.00 s
+    delta = 365.25 + 1.0 + 1.0 / 24.0 + 1.0 / 1440.0 + 1.0 / 86400.0
+    raw = {"oid": "x", "firstmjd": 60000.0, "lastmjd": 60000.0 + delta}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["delta_mjd_human"] == "1 yr 1 d 1 h 1 m 1.00 s"
+
+
+def test_delta_mjd_human_strips_leading_zero_units():
+    # 1 h 2 m 3 s — no yr/d, leading zero units omitted
+    delta = 1.0 / 24.0 + 2.0 / 1440.0 + 3.0 / 86400.0
+    raw = {"oid": "x", "firstmjd": 60000.0, "lastmjd": 60000.0 + delta}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["delta_mjd_human"] == "1 h 2 m 3.00 s"
+
+
+def test_delta_mjd_human_keeps_interior_zeros():
+    # 1 d 0 h 0 m 1 s — interior zeros stay so the units stay readable
+    delta = 1.0 + 1.0 / 86400.0
+    raw = {"oid": "x", "firstmjd": 60000.0, "lastmjd": 60000.0 + delta}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["delta_mjd_human"] == "1 d 0 h 0 m 1.00 s"
+
+
+def test_delta_mjd_human_zero_shows_seconds_only():
+    raw = {"oid": "x", "firstmjd": 60000.0, "lastmjd": 60000.0}
+    info = shape_object_info(raw, survey="ztf")
+    assert info["delta_mjd_human"] == "0.00 s"
+
+
+def test_delta_mjd_human_none_when_missing():
+    info = shape_object_info({"oid": "x"}, survey="ztf")
+    assert info["delta_mjd_human"] is None
+
+
 def test_missing_ra_dec_returns_none():
     raw = {"oid": "x"}
     info = shape_object_info(raw, survey="ztf")
