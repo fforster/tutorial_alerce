@@ -126,23 +126,32 @@
 
     <dt class="tw-text-text-secondary">Δ MJD</dt>
     {#
-      Two displays of the same duration: the human breakdown (default) and
-      a raw 6-decimal day count. Both strings are precomputed and stashed
-      on data-* attrs so the toggle is pure DOM — no recompute on click.
+      Two displays of the same duration: the human breakdown (yr/d/h/m/s)
+      and a raw 6-decimal day count. Both strings are precomputed and
+      stashed on data-* attrs so the toggle is pure DOM — no recompute
+      on click.
+
+      Default mode is chosen per-object: longer-lived sources (Δ MJD > 1 d)
+      open in `days` because the day count is what users typically reach
+      for ("how old is this object" → seven-decimal days is more useful
+      than "2 yr 3 d 4 h 5 m 6.78 s"). Short-lived events (Δ MJD ≤ 1 d)
+      open in `human` so the user can read seconds-level resolution
+      without mentally parsing 0.000023-day units.
     #}
+    {% set delta_default_days = info.delta_mjd is not none and info.delta_mjd > 1.0 %}
     <dd class="mono delta-mjd-value"
         data-human="{{ info.delta_mjd_human or '' }}"
         data-days="{% if info.delta_mjd is not none %}{{ '%.6f'|format(info.delta_mjd) }}{% endif %}">
-      {% if info.delta_mjd_human %}{{ info.delta_mjd_human }}{% else %}-{% endif %}
+      {% if info.delta_mjd is none %}-{% elif delta_default_days %}{{ "%.6f"|format(info.delta_mjd) }} d{% else %}{{ info.delta_mjd_human }}{% endif %}
     </dd>
     {% if info.delta_mjd is not none %}
     <button
       type="button"
       class="delta-mjd-toggle tw-justify-self-start tw-px-1 tw-text-[10px] tw-leading-none tw-text-accent hover:tw-text-text-primary tw-border tw-border-border tw-rounded"
-      data-mode="human"
+      data-mode="{{ 'days' if delta_default_days else 'human' }}"
       title="Toggle Δ MJD between the human breakdown (yr/d/h/m/s) and days with 6 decimals."
-      aria-pressed="false"
-    >Days</button>
+      aria-pressed="{{ 'true' if delta_default_days else 'false' }}"
+    >{{ 'Human' if delta_default_days else 'Days' }}</button>
     {% else %}
     <span></span>
     {% endif %}
