@@ -90,6 +90,14 @@
     const resp = await fetch(url, { headers: { "HX-Request": "true" } });
     if (!resp.ok) return null;
     const html = await resp.text();
+    // Keep the Back cache in sync with the page we're crossing into — this
+    // navigation never re-renders #results-slot, so without this Back would
+    // restore the stale previous page. Prefer the server's HX-Push-Url (the
+    // canonical share URL) for the cached address; fall back to this query.
+    if (window.cacheResultsListing) {
+      const pushUrl = resp.headers.get("HX-Push-Url");
+      window.cacheResultsListing(html, pushUrl || `/?${params.toString()}`);
+    }
     // Parse into a detached template so no side effects (inline scripts
     // don't run, no <img> loads) touch the live document.
     const tpl = document.createElement("template");

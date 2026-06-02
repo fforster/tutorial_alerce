@@ -154,6 +154,21 @@ window.send_classes_data = send_classes_data;
       sessionStorage.setItem(SS_URL, url || "");
     } catch (_) { /* quota / private mode — the in-memory copy still works */ }
   }
+
+  // Public hook for object_nav.js cross-page navigation (arrows crossing a page
+  // boundary, or the in-detail page dropdown). Those fetch a new page's listing
+  // but never re-render #results-slot, so the afterSwap caching listener never
+  // fires and the Back cache would stay stale on the previous page — the cause
+  // of "Back from page 2 sends me to page 1". Letting that path push the
+  // freshly-fetched page in keeps Back aligned with the page being browsed.
+  window.cacheResultsListing = function (html, url) {
+    if (!html) return;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = html;
+    wrap.querySelectorAll(".htmx-request, .row-return-highlight")
+      .forEach((e) => e.classList.remove("htmx-request", "row-return-highlight"));
+    storeListing(wrap.innerHTML, url || "");
+  };
   function cachedHtml() {
     if (window._lastResultsHtml) return window._lastResultsHtml;
     try { return sessionStorage.getItem(SS_HTML) || ""; } catch (_) { return ""; }
